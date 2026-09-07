@@ -33,7 +33,10 @@ def build_schedule():
         parts.append(block)
     parts.append(f"🕐 **빈 시간**  {sc['free_slots']}")
     parts.append("\n**📝 과제**")
-    for days, name, note in src.get_assignments():
+    assignments = src.get_assignments()
+    if not assignments:
+        parts.append("_없음_")
+    for days, name, note in assignments:
         line = f"{dday_mark(days)} **D-{days}**  {name}"
         if note:
             line += f"\n> {note}"
@@ -70,8 +73,11 @@ def build_market():
 
 def build_news():
     lines = []
-    for tag, title, detail in src.get_news():
-        lines.append(f"**{tag}** {title}\n> {detail}")
+    for tag, title, detail, url in src.get_news():
+        block = f"**{tag}** {title}\n> {detail}"
+        if url:
+            block += f"\n-# [더보기]({url})"
+        lines.append(block)
     return ds.make_embed("🗞️ 뉴스", "\n\n".join(lines), "news")
 
 

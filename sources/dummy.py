@@ -1,8 +1,78 @@
 """각 섹션의 데이터 소스.
 
-지금은 전부 더미 데이터를 돌려준다.
-실제 API/크롤링으로 교체할 때 이 파일의 함수 하나씩만 갈아끼우면 된다.
+get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨.
+나머지는 아직 더미 데이터. 실제 API/크롤링으로 교체할 때 이 파일의
+함수 하나씩만 갈아끼우면 된다.
 """
+
+from datetime import date, datetime, timedelta, timezone
+
+from sources import _rss
+from sources.assignments_data import ASSIGNMENTS
+from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
+
+KST = timezone(timedelta(hours=9))
+
+YONHAP_POLITICS = "https://www.yna.co.kr/rss/politics.xml"
+YONHAP_SOCIETY = "https://www.yna.co.kr/rss/society.xml"
+YONHAP_INTERNATIONAL = "https://www.yna.co.kr/rss/international.xml"
+YONHAP_CULTURE = "https://www.yna.co.kr/rss/culture.xml"
+HANKYUNG_POLITICS = "https://www.hankyung.com/feed/politics"
+HANKYUNG_IT = "https://www.hankyung.com/feed/it"  # 연합뉴스엔 IT/과학 전용 피드가 없음
+
+CROSSCHECK_THRESHOLD = 0.34  # 제목 토큰 겹침 비율 — 이 이상이면 "동시 보도"로 간주
+DETAIL_MAX_LEN = 140
+
+
+def _single_category(label, feed_url, fallback_note):
+    """한 매체·한 카테고리에서 최신 1건을 뽑는다. 실패 시 예외를 던진다.
+
+    반환: (라벨, 제목, 배경설명, 원문링크) — 링크는 본문에 노출하지 않고
+    main.py가 "더보기" 버튼처럼 짧게 붙인다.
+    """
+    items = _rss.fetch_rss(feed_url)
+    if not items:
+        raise RuntimeError("empty feed")
+    top = items[0]
+    detail = _rss.clean_text(top["description"], DETAIL_MAX_LEN) or fallback_note
+    return (label, top["title"], detail, top["link"])
+
+
+def _politics_crosschecked():
+    """정치는 연합뉴스·한경 두 매체 제목을 비교해 겹치는 이슈를 우선 채택한다.
+
+    형태소 분석기 없이 쓰는 근사치 교차검증이라, 실패하면 조용히
+    단일 매체(연합뉴스) 1건으로 낮춰서 보여준다 — 논평 없이 사실만.
+    """
+    try:
+        yh_items = _rss.fetch_rss(YONHAP_POLITICS)[:8]
+    except Exception:
+        yh_items = []
+    try:
+        hk_items = _rss.fetch_rss(HANKYUNG_POLITICS)[:8]
+    except Exception:
+        hk_items = []
+
+    if not yh_items and not hk_items:
+        raise RuntimeError("정치 RSS 둘 다 실패")
+
+    if yh_items and hk_items:
+        best, best_score = None, 0.0
+        for y in yh_items:
+            y_tokens = _rss.title_tokens(y["title"])
+            for h in hk_items:
+                score = _rss.overlap_ratio(y_tokens, _rss.title_tokens(h["title"]))
+                if score > best_score:
+                    best_score, best = score, y
+        if best and best_score >= CROSSCHECK_THRESHOLD:
+            detail = _rss.clean_text(best["description"], DETAIL_MAX_LEN) or "연합뉴스·한경 동시 보도"
+            detail = f"{detail} (연합뉴스·한경 동시 보도)"
+            return ("🏛️ 정치", best["title"], detail, best["link"])
+
+    top = yh_items[0] if yh_items else hk_items[0]
+    detail = _rss.clean_text(top["description"], DETAIL_MAX_LEN) or "단일 매체 확인"
+    detail = f"{detail} (단일 매체 확인)"
+    return ("🏛️ 정치", top["title"], detail, top["link"])
 
 
 def get_highlights():
@@ -14,25 +84,65 @@ def get_highlights():
     ]
 
 
+def _to_minutes(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _to_hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
 def get_schedule():
-    """TODO: Google Calendar API 연동"""
-    return {
-        "events": [
-            ("09:00", "UROP 정기 미팅", "공대 3층 · 지난주 더미데이터 프론트 완료 보고"),
-            ("14:00", "교수님 메일 회신", "답장 지연 3일차"),
-            ("19:00", "LG Aimers 팀 스터디", "온라인 · 제구 예측 모델 피처 논의"),
-        ],
-        "free_slots": "10:30~13:30 (3h) · 15:00~18:30 (3.5h)",
-    }
+    """고정 시간표(sources/timetable_fixed.py)에서 오늘 요일 것만 뽑는다.
+
+    구글 캘린더 대신 매주 반복되는 수업·알바 시간을 하드코딩해 쓴다.
+    시간이 바뀌면 timetable_fixed.py만 고치면 된다.
+    """
+    weekday = datetime.now(KST).weekday()  # 0=월 ... 6=일
+    today = FIXED_TIMETABLE.get(weekday, [])
+
+    events = [(f"{s}–{e}", name, detail) for s, e, name, detail in today]
+
+    slots = []
+    cursor = _to_minutes(DAY_START)
+    day_end = _to_minutes(DAY_END)
+    for s, e, _name, _detail in today:
+        s_m, e_m = _to_minutes(s), _to_minutes(e)
+        if s_m > cursor and s_m - cursor >= 30:
+            hours = (s_m - cursor) / 60
+            slots.append(f"{_to_hhmm(cursor)}~{_to_hhmm(s_m)} ({hours:g}h)")
+        cursor = max(cursor, e_m)
+    if day_end > cursor and day_end - cursor >= 30:
+        hours = (day_end - cursor) / 60
+        slots.append(f"{_to_hhmm(cursor)}~{_to_hhmm(day_end)} ({hours:g}h)")
+
+    if slots:
+        free_slots = " · ".join(slots)
+    elif today:
+        free_slots = "빈 시간 없음"
+    else:
+        free_slots = "오늘은 고정 일정 없음"
+
+    return {"events": events, "free_slots": free_slots}
 
 
 def get_assignments():
-    """TODO: #과제입력 채널 메시지를 봇 토큰으로 읽어 LLM 파싱"""
-    return [
-        (1, "컴퓨터비전 과제 3", "내일 23:59 마감 · 오늘 착수 권장"),
-        (4, "웹프 팀플 발표자료", ""),
-        (9, "논문 리뷰 요약 제출", ""),
-    ]
+    """sources/assignments_data.py에 수동으로 적어둔 과제 목록을 D-day로 변환.
+
+    새 과제가 생기면 그 파일에 한 줄 추가하면 된다. 마감이 지난 항목은
+    자동으로 제외되니 지울 필요 없음.
+    """
+    today = datetime.now(KST).date()
+    result = []
+    for deadline_str, name, note in ASSIGNMENTS:
+        y, m, d = (int(x) for x in deadline_str.split("-"))
+        days = (date(y, m, d) - today).days
+        if days < 0:
+            continue
+        result.append((days, name, note))
+    result.sort(key=lambda x: x[0])
+    return result
 
 
 def get_market():
@@ -64,14 +174,38 @@ def get_market():
 
 
 def get_news():
-    """TODO: 연합뉴스/한경 RSS + LLM 분류·요약"""
-    return [
-        ("🏛️ 정치", "정기국회 예산안 심사 착수", "쟁점은 복지·SOC 배분. 법정 처리시한 12월 2일. 여야 이견으로 지연 관측"),
-        ("🔬 과기", "오픈소스 멀티모달 모델 신버전", "비전-언어 벤치마크 상위권. 가중치 공개로 제3자 재현 검증 가능해진 점이 핵심"),
-        ("🏙️ 사회", "AI 기본법 시행령 논의", "고위험 AI 범위와 사업자 의무가 쟁점"),
-        ("🌏 국제", "美·中 관세 협상 재개 전망", "반도체 수출통제 완화 여부가 관건. 국내 반도체주에 직접 영향"),
-        ("🎬 문화", "주말 박스오피스 1위 교체", "신작 개봉주 100만 돌파"),
-    ]
+    """연합뉴스/한경 RSS 최신 1건씩. 정치는 두 매체 교차확인.
+
+    각 카테고리는 독립적으로 fallback 처리한다 — 하나가 실패해도
+    나머지 카테고리는 정상 출력되고, 브리핑 전체는 깨지지 않는다.
+    """
+    try:
+        politics = _politics_crosschecked()
+    except Exception:
+        politics = ("🏛️ 정치", "(연합뉴스·한경 접속 실패)", "잠시 후 다시 시도해주세요", None)
+
+    try:
+        society = _single_category("🏙️ 사회", YONHAP_SOCIETY, "(요약 없음 — 원문 참고)")
+    except Exception:
+        society = ("🏙️ 사회", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+
+    try:
+        international = _single_category("🌏 국제", YONHAP_INTERNATIONAL, "(요약 없음 — 원문 참고)")
+    except Exception:
+        international = ("🌏 국제", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+
+    try:
+        # 한경 IT 피드는 <description>이 없어 제목만 온다.
+        tech = _single_category("🔬 과기", HANKYUNG_IT, "(요약 없음 — 원문 참고)")
+    except Exception:
+        tech = ("🔬 과기", "(한경 접속 실패)", "잠시 후 다시 시도해주세요", None)
+
+    try:
+        culture = _single_category("🎬 문화", YONHAP_CULTURE, "(요약 없음 — 원문 참고)")
+    except Exception:
+        culture = ("🎬 문화", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+
+    return [politics, society, international, tech, culture]
 
 
 def get_sports():
