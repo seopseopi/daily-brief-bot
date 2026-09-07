@@ -1,0 +1,8 @@
+# 현재 뼈대는 표준 라이브러리만 사용 → 설치할 것 없음.
+#
+# 소스를 실제 API로 교체하면서 필요할 때 아래처럼 추가한다:
+#   feedparser            # 뉴스 RSS (get_news)
+#   requests              # 크롤링/HTTP 일반
+#   yfinance              # 미장 시세 (get_market)
+#   google-api-python-client google-auth  # 구글 캘린더 (get_schedule)
+#   feedparser            # arXiv (get_study) — arXiv도 RSS/Atom 제공

@@ -1,0 +1,12 @@
+# 비밀값은 절대 커밋하지 않는다 (GitHub Secrets 사용)
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+.DS_Store
