@@ -38,6 +38,7 @@ DC_GALLERIES = [
 REDDIT_SUBS = [("LocalLLaMA", "r/LocalLLaMA"), ("ClaudeAI", "r/ClaudeAI")]
 NO_EXCERPT_NOTE = "(본문 요약 없음 — 더보기 참고)"
 
+RESEARCH_FIELD = "Multimodal AI Reliability & Metacognition"
 RESEARCH_KEYWORDS = [
     "vision language model",
     "confidence calibration",
@@ -85,6 +86,22 @@ HANKYUNG_IT = "https://www.hankyung.com/feed/it"  # 연합뉴스엔 IT/과학 �
 
 CROSSCHECK_THRESHOLD = 0.34  # 제목 토큰 겹침 비율 — 이 이상이면 "동시 보도"로 간주
 DETAIL_MAX_LEN = 140
+
+# 이번 실행에서 실패한 항목 이름들 — main.py가 헤더 하단에 한 줄로 보여준다.
+# 프로세스가 한 번 뜨고 끝나는 배치 스크립트라 모듈 전역 리스트로 충분하다.
+_FAILURES = []
+
+
+def _fail(label):
+    _FAILURES.append(label)
+
+
+def get_failures():
+    """이번 실행에서 쌓인 실패 라벨을 반환하고 비운다."""
+    global _FAILURES
+    out = _FAILURES
+    _FAILURES = []
+    return out
 
 
 def _single_category(label, feed_url, fallback_note):
@@ -151,9 +168,11 @@ def get_highlights(context_text=""):
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         print(f"[경고] LLM 요약 실패: HTTP {e.code}\n{body}")
+        _fail("오늘의 세 줄(LLM)")
         return [("오늘의 세 줄 요약 실패", "아래 섹션을 직접 확인해주세요 — LLM 호출이 안 됐습니다")]
     except Exception as e:
         print(f"[경고] LLM 요약 실패: {type(e).__name__}: {e}")
+        _fail("오늘의 세 줄(LLM)")
         return [("오늘의 세 줄 요약 실패", "아래 섹션을 직접 확인해주세요 — LLM 호출이 안 됐습니다")]
 
 
@@ -272,6 +291,7 @@ def _us_index_and_note():
         us_note = f"美10년물 {tnx['price']:.2f}% · VIX {vix['price']:.1f}"
         vix_price = vix["price"]
     except Exception:
+        _fail("美 금리·VIX")
         us_note = "(금리·VIX 조회 실패)"
         vix_price = None
     return us_index, us_note, sp, nq, vix_price
@@ -287,6 +307,7 @@ def _us_hot():
                 note = f"일중 고가 ${q['day_high']:.2f} · 저가 ${q['day_low']:.2f}"
             out.append((name, _fmt_pct(q["change_pct"]), note))
         except Exception:
+            _fail(f"미국 관심종목({name})")
             out.append((name, "(조회 실패)", ""))
     return out
 
@@ -352,6 +373,7 @@ def get_notices():
             current = fetch_fn()
         except Exception as e:
             print(f"[경고] {label} 조회 실패: {type(e).__name__}: {e}")
+            _fail(label)
             new_state[key] = state.get(key, [])
             continue
 
@@ -373,17 +395,20 @@ def get_market():
     try:
         kr_index, kr_note = _kr_index_and_note()
     except Exception:
+        _fail("코스피/코스닥")
         kr_index, kr_note = "(코스피 조회 실패)", "잠시 후 다시 시도해주세요"
 
     try:
         kr_holdings, kr_hot = _kr_holdings_and_hot()
     except Exception:
+        _fail("보유·화제종목(국장)")
         kr_holdings, kr_hot = [], []
 
     try:
         us_index, us_note, sp, nq, vix_price = _us_index_and_note()
         outlook_kr = _kr_outlook(sp, nq)
     except Exception:
+        _fail("미국 지수")
         us_index, us_note = "(미국 지수 조회 실패)", "잠시 후 다시 시도해주세요"
         outlook_kr = ("(조회 실패)", "미국 지수 데이터를 가져오지 못했습니다")
         vix_price = None
@@ -392,6 +417,7 @@ def get_market():
         fx = _market.fetch_naver_fx()
         fx_str = f"원/달러 {fx['USD']:,.2f} · 원/엔(100엔) {fx['JPY100']:,.2f} · 원/위안 {fx['CNY']:,.2f}"
     except Exception:
+        _fail("환율")
         fx_str = "(환율 조회 실패)"
 
     return {
@@ -414,34 +440,56 @@ def get_news():
 
     각 카테고리는 독립적으로 fallback 처리한다 — 하나가 실패해도
     나머지 카테고리는 정상 출력되고, 브리핑 전체는 깨지지 않는다.
+
+    조회에 성공한 카테고리들은 한 번의 LLM 호출로 "왜 중요한지" 배경
+    설명을 받아 detail을 덮어쓴다. LLM이 없거나 실패하면 RSS 리드문을
+    그대로 쓴다 — 완전히 새 기능이 아니라 기존 폴백 위에 얹는 개선.
     """
+    results = []
     try:
-        politics = _politics_crosschecked()
+        results.append(list(_politics_crosschecked()))
     except Exception:
-        politics = ("🏛️ 정치", "(연합뉴스·한경 접속 실패)", "잠시 후 다시 시도해주세요", None)
+        _fail("뉴스-정치")
+        results.append(["🏛️ 정치", "(연합뉴스·한경 접속 실패)", "잠시 후 다시 시도해주세요", None])
 
     try:
-        society = _single_category("🏙️ 사회", YONHAP_SOCIETY, "(요약 없음 — 원문 참고)")
+        results.append(list(_single_category("🏙️ 사회", YONHAP_SOCIETY, "(요약 없음 — 원문 참고)")))
     except Exception:
-        society = ("🏙️ 사회", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+        _fail("뉴스-사회")
+        results.append(["🏙️ 사회", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None])
 
     try:
-        international = _single_category("🌏 국제", YONHAP_INTERNATIONAL, "(요약 없음 — 원문 참고)")
+        results.append(list(_single_category("🌏 국제", YONHAP_INTERNATIONAL, "(요약 없음 — 원문 참고)")))
     except Exception:
-        international = ("🌏 국제", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+        _fail("뉴스-국제")
+        results.append(["🌏 국제", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None])
 
     try:
         # 한경 IT 피드는 <description>이 없어 제목만 온다.
-        tech = _single_category("🔬 과기", HANKYUNG_IT, "(요약 없음 — 원문 참고)")
+        results.append(list(_single_category("🔬 과기", HANKYUNG_IT, "(요약 없음 — 원문 참고)")))
     except Exception:
-        tech = ("🔬 과기", "(한경 접속 실패)", "잠시 후 다시 시도해주세요", None)
+        _fail("뉴스-과기")
+        results.append(["🔬 과기", "(한경 접속 실패)", "잠시 후 다시 시도해주세요", None])
 
     try:
-        culture = _single_category("🎬 문화", YONHAP_CULTURE, "(요약 없음 — 원문 참고)")
+        results.append(list(_single_category("🎬 문화", YONHAP_CULTURE, "(요약 없음 — 원문 참고)")))
     except Exception:
-        culture = ("🎬 문화", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None)
+        _fail("뉴스-문화")
+        results.append(["🎬 문화", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None])
 
-    return [politics, society, international, tech, culture]
+    ok_indices = [i for i, r in enumerate(results) if r[3]]  # link 있으면 = 조회 성공
+    if ok_indices:
+        try:
+            items_for_llm = [{"label": results[i][0], "title": results[i][1], "lead": results[i][2]} for i in ok_indices]
+            explanations = _llm.explain_news(items_for_llm)
+            for idx, exp in zip(ok_indices, explanations):
+                results[idx][2] = exp
+        except Exception as e:
+            print(f"[경고] 뉴스 배경설명(LLM) 실패: {type(e).__name__}: {e}")
+            _fail("뉴스 배경설명(LLM)")
+            # 실패해도 results[i][2]엔 이미 RSS 리드문이 들어있어 그대로 유지됨
+
+    return [tuple(r) for r in results]
 
 
 def _doosan_line(game):
@@ -510,6 +558,7 @@ def _kbo():
         standing = _kbo_standings()
     except Exception as e:
         print(f"[경고] KBO 순위 조회 실패: {type(e).__name__}: {e}")
+        _fail("두산 순위")
         standing = "(순위 조회 실패)"
 
     return (head, detail, standing, next_game)
@@ -546,11 +595,13 @@ def get_sports():
     try:
         doosan = _kbo()
     except Exception:
+        _fail("두산 경기")
         doosan = ("(두산 경기 조회 실패)", "잠시 후 다시 시도해주세요", "", "")
 
     try:
         football = _epl_highlights()
     except Exception:
+        _fail("EPL 결과")
         football = "(EPL 결과 조회 실패)"
 
     return {"doosan": doosan, "football": football}
@@ -577,14 +628,50 @@ def _pick_glossary_terms(n=3):
     return [GLOSSARY_TERMS[(offset + i) % total] for i in range(n)]
 
 
-def get_study():
-    """arXiv에서 관심 키워드에 걸리는 최신 논문 1편을 골라 초록을 정리한다.
+def _paper_sections_via_llm(best, matched):
+    """LLM이 초록을 실제로 읽고 문제의식/방법/결과/한계/접점을 뽑는다.
 
-    LLM 요약이 아니라 초록을 문장 위치로 잘라 배치하는 근사치다
+    '내 연구와의 접점'도 이제 키워드 매칭이 아니라 LLM이 초록을 읽고
+    판단한다 — 관련 없으면 억지로 엮지 말고 솔직하게 말하도록 프롬프트에
+    명시해뒀다.
+    """
+    s = _llm.summarize_paper(best["title"], best["summary"], RESEARCH_FIELD, RESEARCH_KEYWORDS)
+    return [
+        ("문제의식", s["problem"]),
+        ("방법", s["method"]),
+        ("결과", s["result"]),
+        ("한계", s["limitation"]),
+        ("내 연구와의 접점", s["connection"]),
+    ]
+
+
+def _paper_sections_heuristic(best, matched):
+    """LLM 실패 시 폴백 — 초록을 문장 위치로 잘라 배치하는 근사치.
+
     (문제의식=첫 문장, 방법=중간, 결과=끝 문장 — 논문 초록의 흔한 서술
     순서를 이용). 한계는 "however/limitation" 류 신호어가 있는 문장을
-    찾아 쓰고, 없으면 정직하게 "명시 없음"이라고 표시한다.
-    "내 연구와의 접점"은 추론이 아니라 실제로 매칭된 키워드를 그대로 보여준다.
+    찾아 쓰고, 없으면 정직하게 "명시 없음"이라고 표시한다. 접점은
+    실제로 매칭된 키워드를 그대로 보여준다(추론 아님).
+    """
+    problem, method, result, limitation = _arxiv.split_sections(best["summary"])
+    sections = [("문제의식", _tr(problem))]
+    if method:
+        sections.append(("방법", _tr(method, cap=220)))
+    if result:
+        sections.append(("결과", _tr(result)))
+    sections.append(("한계", _tr(limitation) if limitation else "초록에 명시된 한계 없음 — 원문 참고"))
+    sections.append((
+        "내 연구와의 접점",
+        f"키워드 매칭: {', '.join(matched)}" if matched else "카테고리 기준으로만 선정됨 (키워드 매칭 없음)",
+    ))
+    return sections
+
+
+def get_study():
+    """arXiv에서 관심 키워드에 걸리는 최신 논문 1편을 골라 LLM이 요약한다.
+
+    LLM이 없거나 실패하면 초록을 문장 위치로 잘라 배치하는 근사치
+    (_paper_sections_heuristic)로 조용히 폴백한다.
     개념/용어는 정적 용어집을 날짜로 순환한다 (LLM 호출 없음).
     """
     try:
@@ -592,20 +679,16 @@ def get_study():
         best, matched = _arxiv.pick_best(papers, RESEARCH_KEYWORDS)
     except Exception as e:
         print(f"[경고] arXiv 조회 실패: {type(e).__name__}: {e}")
+        _fail("arXiv 논문")
         best, matched = None, []
 
     if best:
-        problem, method, result, limitation = _arxiv.split_sections(best["summary"])
-        sections = [("문제의식", _tr(problem))]
-        if method:
-            sections.append(("방법", _tr(method, cap=220)))
-        if result:
-            sections.append(("결과", _tr(result)))
-        sections.append(("한계", _tr(limitation) if limitation else "초록에 명시된 한계 없음 — 원문 참고"))
-        sections.append((
-            "내 연구와의 접점",
-            f"키워드 매칭: {', '.join(matched)}" if matched else "카테고리 기준으로만 선정됨 (키워드 매칭 없음)",
-        ))
+        try:
+            sections = _paper_sections_via_llm(best, matched)
+        except Exception as e:
+            print(f"[경고] 논문 LLM 요약 실패: {type(e).__name__}: {e}")
+            _fail("논문 요약(LLM)")
+            sections = _paper_sections_heuristic(best, matched)
 
         arxiv_id = best["url"].rstrip("/").rsplit("/", 1)[-1]
         authors = best["authors"]
@@ -629,13 +712,12 @@ def get_study():
     }
 
 
-def _dc_excerpt(post):
-    """선택된 디시 글만 상세페이지를 한 번 더 열어 발췌를 가져온다."""
+def _dc_excerpt_raw(post):
+    """선택된 디시 글만 상세페이지를 한 번 더 열어 발췌를 가져온다. 실패 시 빈 문자열."""
     try:
-        excerpt = _community.fetch_dc_post_excerpt(post["url"])
+        return _community.fetch_dc_post_excerpt(post["url"])
     except Exception:
-        excerpt = ""
-    return excerpt or NO_EXCERPT_NOTE
+        return ""
 
 
 def get_community():
@@ -644,9 +726,12 @@ def get_community():
     디시는 선택된 글의 상세페이지에서 JSON-LD articleBody(검색용 요약,
     이미 짧게 잘려있음)를 발췌로 쓴다. 레딧은 추가 요청 없이 목록 RSS의
     content 필드에서 자체 글 본문만 최대한 걸러낸다 — 레딧이 이미 IP
-    차단이 잦아서 요청을 늘리지 않으려는 의도. 둘 다 못 건지면(이미지
-    글 등) 정직하게 "본문 요약 없음"으로 표시. 갤러리/서브레딧 하나가
-    막혀도 나머지는 정상 출력된다.
+    차단이 잦아서 요청을 늘리지 않으려는 의도.
+
+    최종 선정된 글들은 한 번의 LLM 호출로 "디깅 요약"을 받는다 — 잘린
+    발췌를 자연스럽게 다듬고, 발췌가 없으면 제목만으로 짧게 정리한다.
+    LLM이 없거나 실패하면 원본 발췌(또는 "본문 요약 없음")를 그대로 쓴다.
+    갤러리/서브레딧 하나가 막혀도 나머지는 정상 출력된다.
     """
     dc_hits = []
     for gallery_id, label in DC_GALLERIES:
@@ -667,22 +752,37 @@ def get_community():
         if post:
             reddit_hits.append((label, post))
 
+    # entries의 각 원소: [label, stat, title, fallback_detail, url, raw_excerpt(LLM 입력용)]
     entries = []
     for label, post in dc_hits[:3]:
         stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
-        entries.append((label, stat, post["title"], _dc_excerpt(post), post["url"]))
+        raw = _dc_excerpt_raw(post)
+        entries.append([label, stat, post["title"], raw or NO_EXCERPT_NOTE, post["url"], raw])
 
     for label, post in reddit_hits:
-        excerpt = _tr(post["excerpt"], cap=140) if post.get("excerpt") else NO_EXCERPT_NOTE
-        entries.append((label, "레딧 오늘의 인기글", _tr(post["title"], cap=100), excerpt, post["url"]))
+        raw = post.get("excerpt") or ""
+        fallback = _tr(raw, cap=140) if raw else NO_EXCERPT_NOTE
+        entries.append([label, "레딧 오늘의 인기글", _tr(post["title"], cap=100), fallback, post["url"], raw])
 
     for label, post in dc_hits[3:]:
         if len(entries) >= 5:
             break
         stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
-        entries.append((label, stat, post["title"], _dc_excerpt(post), post["url"]))
+        raw = _dc_excerpt_raw(post)
+        entries.append([label, stat, post["title"], raw or NO_EXCERPT_NOTE, post["url"], raw])
 
     if not entries:
-        entries = [("(커뮤니티 조회 실패)", "", "잠시 후 다시 시도해주세요", "", None)]
+        _fail("커뮤니티 전체")
+        return [("(커뮤니티 조회 실패)", "", "잠시 후 다시 시도해주세요", "", None)]
 
-    return entries
+    try:
+        items_for_llm = [{"label": e[0], "title": e[2], "excerpt": e[5]} for e in entries]
+        digests = _llm.explain_community(items_for_llm)
+        for e, d in zip(entries, digests):
+            e[3] = d
+    except Exception as e:
+        print(f"[경고] 커뮤니티 디깅(LLM) 실패: {type(e).__name__}: {e}")
+        _fail("커뮤니티 디깅(LLM)")
+        # 실패해도 entries[i][3]엔 이미 원본 발췌/요약없음 폴백이 들어있음
+
+    return [tuple(e[:5]) for e in entries]

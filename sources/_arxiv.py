@@ -6,12 +6,16 @@ get_study() 전용. 요약을 LLM으로 재작성하는 대신, 초록을 문장
 """
 
 import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
 TIMEOUT = 45  # export.arxiv.org가 복잡한 쿼리에는 종종 느리게 응답함 (25초도 부족했음)
+RETRIES = 3
+RETRY_BACKOFF = 4  # 초. 시도마다 배로 늘림 (4s, 8s)
 NS = {"a": "http://www.w3.org/2005/Atom"}
 
 LIMITATION_SIGNALS = (
@@ -36,8 +40,20 @@ def search(keywords, categories, max_results=15):
         })
     )
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
-        raw = res.read()
+    raw = None
+    last_exc = None
+    for attempt in range(RETRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+                raw = res.read()
+            break
+        except (urllib.error.URLError, TimeoutError) as e:
+            # 429(요청 과다)나 타임아웃은 대개 일시적 — 잠깐 쉬고 재시도.
+            last_exc = e
+            if attempt < RETRIES - 1:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+    if raw is None:
+        raise last_exc
     root = ET.fromstring(raw)
     papers = []
     for entry in root.findall("a:entry", NS):

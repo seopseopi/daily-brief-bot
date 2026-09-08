@@ -20,6 +20,13 @@ def build_header(now, context_text):
     for i, (title, detail) in enumerate(src.get_highlights(context_text), 1):
         num = ["1️⃣", "2️⃣", "3️⃣"][i - 1]
         lines.append(f"{num} **{title}**\n> {detail}")
+
+    # 다른 섹션 + 방금 하이라이트 호출까지 쌓인 실패를 한 줄로 보여준다.
+    # get_highlights()가 끝난 뒤에 모아야 그 실패도 포함된다.
+    failures = src.get_failures()
+    if failures:
+        lines.append(f"-# ⚠️ 오늘 실패: {', '.join(failures)}")
+
     return ds.make_embed(f"📰 {date_str}", "\n\n".join(lines), "header")
 
 

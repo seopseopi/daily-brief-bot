@@ -1,7 +1,9 @@
 """Anthropic API 호출 (stdlib만 사용, SDK 없이 REST 직접 호출).
 
-get_highlights() 전용. API 키 없으면(로컬 테스트 등) 바로 예외를 던져서
-호출부가 비-LLM 폴백으로 넘어가게 한다.
+get_highlights() / get_news() / get_study() / get_community()에서 쓴다.
+API 키 없으면(로컬 테스트 등) 바로 예외를 던져서 호출부가 비-LLM
+폴백으로 넘어가게 한다. 전부 JSON으로만 답하게 프롬프트를 짜고,
+실제 데이터(초록·리드문·발췌)에 없는 내용은 지어내지 말라고 명시한다.
 """
 
 import json
@@ -10,29 +12,18 @@ import urllib.request
 
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-haiku-4-5-20251001"  # 매일 짧은 요약 1번 — 가장 저렴한 모델로 충분
+MODEL = "claude-haiku-4-5-20251001"  # 매일 짧은 요약 몇 번 — 가장 저렴한 모델로 충분
 TIMEOUT = 30
 
-PROMPT_TEMPLATE = """다음은 오늘 아침 브리핑에 들어갈 6개 섹션(일정·과제, 마켓, 뉴스, 스포츠, 공부 피드, 커뮤니티)의 실제 내용이다.
 
-{context}
-
-이 내용을 바탕으로 "오늘의 세 줄"을 뽑아라 — 사용자가 아침에 가장 먼저 알아야 할 것 3가지.
-각 항목은 (제목, 왜 중요한지 한 줄) 형태.
-
-반드시 아래 JSON 배열 형식으로만, 다른 말 없이 정확히 3개 항목으로 답하라:
-[{{"title": "...", "reason": "..."}}, {{"title": "...", "reason": "..."}}, {{"title": "...", "reason": "..."}}]
-"""
-
-
-def summarize_highlights(context_text):
+def _call(prompt, max_tokens=800):
+    """공용 호출부. 응답 텍스트(코드펜스 제거)를 그대로 반환한다."""
     if not API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
 
-    prompt = PROMPT_TEMPLATE.format(context=context_text)
     payload = {
         "model": MODEL,
-        "max_tokens": 500,
+        "max_tokens": max_tokens,
         "temperature": 0.3,
         "messages": [{"role": "user", "content": prompt}],
     }
@@ -54,6 +45,109 @@ def summarize_highlights(context_text):
         if text.startswith("json"):
             text = text[4:]
         text = text.strip()
+    return text
 
-    items = json.loads(text)
+
+def _call_json(prompt, max_tokens=800):
+    return json.loads(_call(prompt, max_tokens))
+
+
+HIGHLIGHTS_PROMPT = """다음은 오늘 아침 브리핑에 들어갈 6개 섹션(일정·과제, 마켓, 뉴스, 스포츠, 공부 피드, 커뮤니티)의 실제 내용이다.
+
+{context}
+
+이 내용을 바탕으로 "오늘의 세 줄"을 뽑아라 — 사용자가 아침에 가장 먼저 알아야 할 것 3가지.
+각 항목은 (제목, 왜 중요한지 한 줄) 형태.
+
+반드시 아래 JSON 배열 형식으로만, 다른 말 없이 정확히 3개 항목으로 답하라:
+[{{"title": "...", "reason": "..."}}, {{"title": "...", "reason": "..."}}, {{"title": "...", "reason": "..."}}]
+"""
+
+
+def summarize_highlights(context_text):
+    items = _call_json(HIGHLIGHTS_PROMPT.format(context=context_text), max_tokens=500)
     return [(it["title"], it["reason"]) for it in items[:3]]
+
+
+NEWS_PROMPT = """다음은 오늘 아침 뉴스 헤드라인 {n}개다. 각 기사 제목과 원문 리드문(있으면)을 준다.
+
+{items}
+
+각 기사가 왜 중요한지/무슨 배경인지 한국어로 한 문장씩 설명하라.
+반드시 지켜야 할 것:
+- 논평·의견 넣지 말고 사실 기반으로만 (누가 옳다/그르다 같은 판단 금지)
+- 주어진 제목·리드문에 없는 내용을 지어내지 말 것. 리드문이 부실해서 배경을 알 수 없으면
+  그냥 리드문을 자연스럽게 다듬어서 써라
+- 각 문장은 80자 이내
+
+반드시 JSON 배열로만, 다른 말 없이 정확히 {n}개 항목, 입력 순서 그대로 답하라:
+["설명1", "설명2", ...]
+"""
+
+
+def explain_news(items):
+    """items: [{"label","title","lead"}, ...]. 반환: 같은 순서의 설명 문자열 리스트."""
+    lines = "\n".join(f"{i + 1}. [{it['label']}] {it['title']} — {it['lead']}" for i, it in enumerate(items))
+    result = _call_json(NEWS_PROMPT.format(n=len(items), items=lines), max_tokens=600)
+    if len(result) != len(items):
+        raise ValueError(f"응답 개수 불일치: {len(result)} != {len(items)}")
+    return result
+
+
+PAPER_PROMPT = """다음은 논문 제목과 초록(영어)이다.
+
+제목: {title}
+초록: {abstract}
+
+이 사람의 연구분야는 "{field}"이고 관심 키워드는 {keywords}이다.
+
+아래 5개 항목으로 한국어 요약을 만들어라. 각 항목 1~2문장, 초록에 실제로 있는
+내용만 써라(지어내지 말 것):
+- problem: 이 논문이 다루는 문제/문제의식
+- method: 어떻게 접근했는지(방법)
+- result: 무엇을 알아냈는지(결과)
+- limitation: 초록에 명시된 한계나 향후 과제. 초록에 그런 언급이 없으면
+  정확히 "초록에 명시된 한계 없음"이라고 써라(지어내지 말 것)
+- connection: 위 연구분야/키워드와 이 논문의 실제 접점. 억지로 엮지 말고,
+  직접적인 관련이 없으면 정확히 "직접적 접점 없음"이라고 솔직하게 써라
+
+반드시 아래 JSON 객체 형식으로만 답하라:
+{{"problem": "...", "method": "...", "result": "...", "limitation": "...", "connection": "..."}}
+"""
+
+
+def summarize_paper(title, abstract, field, keywords):
+    return _call_json(
+        PAPER_PROMPT.format(title=title, abstract=abstract, field=field, keywords=", ".join(keywords)),
+        max_tokens=700,
+    )
+
+
+COMMUNITY_PROMPT = """다음은 커뮤니티(디시인사이드/레딧) 화제글 {n}개다. 각 글의 제목과, 있으면 본문
+발췌(목록/상세 페이지에서 긁어온 것이라 문장 중간에 잘려 있을 수 있음)를 준다.
+
+{items}
+
+각 글에 대해 한국어로 한 문장짜리 "디깅 요약"을 써라.
+반드시 지켜야 할 것:
+- 발췌가 문장 중간에 잘려 있으면 잘린 부분을 지어내지 말고, 있는 내용만 자연스럽게 정리
+- 발췌가 없거나 의미 없으면(이미지만 있는 글 등) 제목만 보고 짧게 정리하되,
+  모르는 내용을 지어내지 말 것
+- 자극적/혐오 표현이 있으면 순화해서 사실만 전달, 논쟁적 어조 쓰지 말 것
+- 각 문장 70자 이내
+
+반드시 JSON 배열로만, 다른 말 없이 정확히 {n}개 항목, 입력 순서 그대로 답하라:
+["요약1", "요약2", ...]
+"""
+
+
+def explain_community(items):
+    """items: [{"label","title","excerpt"}, ...]. 반환: 같은 순서의 요약 문자열 리스트."""
+    lines = "\n".join(
+        f"{i + 1}. [{it['label']}] {it['title']} — 발췌: {it['excerpt'] or '(없음)'}"
+        for i, it in enumerate(items)
+    )
+    result = _call_json(COMMUNITY_PROMPT.format(n=len(items), items=lines), max_tokens=600)
+    if len(result) != len(items):
+        raise ValueError(f"응답 개수 불일치: {len(result)} != {len(items)}")
+    return result
