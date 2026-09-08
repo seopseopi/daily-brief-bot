@@ -151,3 +151,31 @@ def explain_community(items):
     if len(result) != len(items):
         raise ValueError(f"응답 개수 불일치: {len(result)} != {len(items)}")
     return result
+
+
+ASSIGNMENT_PROMPT = """다음은 디스코드 #과제입력 채널에 올라온 메시지 {n}개다. 오늘 날짜는 {today}(KST)다.
+
+{items}
+
+각 메시지가 "과제/할일 등록"인지 판단해서, 맞으면 과제명과 마감일을 뽑아라.
+반드시 지켜야 할 것:
+- 상대적 날짜("내일", "이번주 금요일", "9/20", "다음주까지")는 오늘 날짜 기준으로
+  계산해서 절대 날짜(YYYY-MM-DD)로 변환하라
+- 연도가 안 적혀 있으면 오늘 기준 가장 가까운 미래 날짜로 추정하라
+  (그 날짜가 이미 지난 달/일이면 내년으로)
+- 마감일을 알 수 없거나, 과제 등록이 아니라 잡담·질문·다른 화제면 그 항목은 null
+- 없는 내용을 지어내지 말 것
+
+반드시 JSON 배열로만, 다른 말 없이 정확히 {n}개 항목(입력 순서 유지), 과제로
+판단되면 객체, 아니면 null:
+[{{"name": "...", "deadline": "YYYY-MM-DD", "note": "..."}}, null, ...]
+"""
+
+
+def parse_assignments(messages, today_str):
+    """messages: 원문 문자열 리스트. 반환: 같은 순서로 dict 또는 None 리스트."""
+    lines = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(messages))
+    result = _call_json(ASSIGNMENT_PROMPT.format(n=len(messages), today=today_str, items=lines), max_tokens=900)
+    if len(result) != len(messages):
+        raise ValueError(f"응답 개수 불일치: {len(result)} != {len(messages)}")
+    return result
