@@ -14,10 +14,10 @@ def dday_mark(days):
     return DDAY_EMOJI.get(days, "🟢")
 
 
-def build_header(now):
+def build_header(now, context_text):
     date_str = f"{now.month}월 {now.day}일 {WEEKDAYS[now.weekday()]}요일"
     lines = []
-    for i, (title, detail) in enumerate(src.get_highlights(), 1):
+    for i, (title, detail) in enumerate(src.get_highlights(context_text), 1):
         num = ["1️⃣", "2️⃣", "3️⃣"][i - 1]
         lines.append(f"{num} **{title}**\n> {detail}")
     return ds.make_embed(f"📰 {date_str}", "\n\n".join(lines), "header")
@@ -113,8 +113,10 @@ def build_community():
 
 def main():
     now = datetime.now(KST)
-    embeds = [
-        build_header(now),
+
+    # 헤더의 "오늘의 세 줄"은 다른 섹션 실제 내용을 LLM에 넘겨 요약하므로,
+    # 나머지 섹션을 먼저 만들고 헤더를 맨 마지막에 조립한다.
+    other_embeds = [
         build_schedule(),
         build_market(),
         build_news(),
@@ -122,7 +124,10 @@ def main():
         build_study(),
         build_community(),
     ]
-    ds.send(embeds)
+    context_text = "\n\n".join(f"[{e['title']}]\n{e['description']}" for e in other_embeds)
+    header_embed = build_header(now, context_text)
+
+    ds.send([header_embed] + other_embeds)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨
 
 from datetime import date, datetime, timedelta, timezone
 
-from sources import _arxiv, _community, _market, _rss, _translate
+from sources import _arxiv, _community, _llm, _market, _rss, _translate
 from sources.assignments_data import ASSIGNMENTS
 from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
 
@@ -130,13 +130,16 @@ def _politics_crosschecked():
     return ("🏛️ 정치", top["title"], detail, top["link"])
 
 
-def get_highlights():
-    """오늘의 세 줄. 다른 섹션 결과를 받아 LLM이 요약하는 게 최종 목표."""
-    return [
-        ("밤 9시 반 美 CPI", "예상 +2.6%. 웃돌면 금리 인하 기대 후퇴 → 반도체·성장주 조정 가능"),
-        ("컴퓨터비전 과제 내일 마감", "오전 10:30~13:30 3시간 비어 있음"),
-        ("9시 UROP 미팅", "프론트 API 연동 진척 공유 예정"),
-    ]
+def get_highlights(context_text=""):
+    """다른 6개 섹션의 실제 내용을 받아 LLM(Claude Haiku)이 세 줄로 요약.
+
+    ANTHROPIC_API_KEY가 없거나 호출이 실패하면 조용히 비-LLM 폴백으로
+    내려간다 — 브리핑 자체는 항상 나가야 하므로.
+    """
+    try:
+        return _llm.summarize_highlights(context_text)
+    except Exception:
+        return [("오늘의 세 줄 요약 실패", "아래 섹션을 직접 확인해주세요 — LLM 호출이 안 됐습니다")]
 
 
 def _to_minutes(hhmm):
