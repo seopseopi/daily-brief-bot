@@ -22,6 +22,11 @@ def _get(url):
         return res.read()
 
 
+def fetch_json(url):
+    """JSON API 공용 fetch. 네이버스포츠(KBO/EPL) 등에서도 재사용."""
+    return json.loads(_get(url))
+
+
 def _num(s):
     """'1,234.5' -> 1234.5"""
     return float(str(s).replace(",", ""))

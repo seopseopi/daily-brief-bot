@@ -16,6 +16,10 @@ KST = timezone(timedelta(hours=9))
 HOLDINGS_KR = [("017670", "SK텔레콤"), ("009150", "삼성전기")]
 WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
 
+DOOSAN_CODE = "OB"
+NAVER_SPORTS_GAMES = "https://api-gw.sports.naver.com/schedule/games"
+EPL_BIG_CLUBS = {"맨시티", "아스널", "리버풀", "첼시", "맨유", "토트넘"}
+
 YONHAP_POLITICS = "https://www.yna.co.kr/rss/politics.xml"
 YONHAP_SOCIETY = "https://www.yna.co.kr/rss/society.xml"
 YONHAP_INTERNATIONAL = "https://www.yna.co.kr/rss/international.xml"
@@ -326,13 +330,92 @@ def get_news():
     return [politics, society, international, tech, culture]
 
 
+def _doosan_line(game):
+    is_home = game["homeTeamCode"] == DOOSAN_CODE
+    mine = game["homeTeamScore"] if is_home else game["awayTeamScore"]
+    theirs = game["awayTeamScore"] if is_home else game["homeTeamScore"]
+    opp = game["awayTeamName"] if is_home else game["homeTeamName"]
+    outcome = "승" if mine > theirs else "패" if mine < theirs else "무"
+    return f"두산 {mine}-{theirs} {opp} ({outcome})"
+
+
+def _kbo():
+    """두산 최근 경기 결과 + 다음 경기 일정.
+
+    네이버스포츠 비공식 API. 시즌 순위/게임차를 주는 무료 엔드포인트를
+    찾지 못해 그 부분은 뺐다 — 필요하면 나중에 추가.
+    """
+    today = datetime.now(KST).date()
+    url = (
+        f"{NAVER_SPORTS_GAMES}?fields=basic,score&size=50"
+        f"&fromDate={today - timedelta(days=4)}&toDate={today + timedelta(days=1)}"
+        "&upperCategoryId=kbaseball&categoryId=kbo"
+    )
+    games = _market.fetch_json(url)["result"]["games"]
+    doosan_games = [g for g in games if DOOSAN_CODE in (g["homeTeamCode"], g["awayTeamCode"])]
+
+    results = sorted((g for g in doosan_games if g["statusCode"] == "RESULT"),
+                      key=lambda g: g["gameDate"], reverse=True)
+    upcoming = sorted((g for g in doosan_games if g["statusCode"] == "BEFORE"),
+                       key=lambda g: g["gameDateTime"])
+
+    if results:
+        head = _doosan_line(results[0])
+        detail = f"{results[0]['gameDate']} 경기 종료"
+    else:
+        head, detail = "(최근 경기 결과 없음)", ""
+
+    if upcoming:
+        g = upcoming[0]
+        is_home = g["homeTeamCode"] == DOOSAN_CODE
+        opp = g["awayTeamName"] if is_home else g["homeTeamName"]
+        when = datetime.fromisoformat(g["gameDateTime"]).strftime("%m/%d %H:%M")
+        next_game = f"다음 경기 {when} vs {opp} ({'홈' if is_home else '원정'})"
+    else:
+        next_game = "(예정된 경기 없음)"
+
+    return (head, detail, next_game)
+
+
+def _epl_highlights(limit=2):
+    """빅클럽(맨시티·아스널·리버풀·첼시·맨유·토트넘)이 낀 최근 경기 결과만 추린다."""
+    today = datetime.now(KST).date()
+    url = (
+        f"{NAVER_SPORTS_GAMES}?fields=basic,score&size=50"
+        f"&fromDate={today - timedelta(days=5)}&toDate={today}"
+        "&upperCategoryId=wfootball&categoryId=epl"
+    )
+    games = _market.fetch_json(url)["result"]["games"]
+
+    scored = []
+    for g in games:
+        if g["statusCode"] != "RESULT":
+            continue
+        big_count = (g["homeTeamName"] in EPL_BIG_CLUBS) + (g["awayTeamName"] in EPL_BIG_CLUBS)
+        if big_count:
+            scored.append((g["gameDate"], big_count, g))
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    lines = [
+        f"{g['homeTeamName']} {g['homeTeamScore']}-{g['awayTeamScore']} {g['awayTeamName']}"
+        for _, _, g in scored[:limit]
+    ]
+    return " · ".join(lines) if lines else "(주요 경기 결과 없음)"
+
+
 def get_sports():
-    """TODO: KBO/EPL 스코어 API"""
-    return {
-        "doosan": ("두산 4-6 LG 패", "김재환 2안타 1타점, 선발 5이닝 3실점. 불펜 8회 역전 허용",
-                   "5위 (63승 2무 61패) · 5강 -1.5G · 오늘 18:30 vs KT 잠실"),
-        "football": "EPL 토트넘 2-1 승 (손흥민 도움 1) · 레알 3-0 완승",
-    }
+    """KBO(두산) + EPL. 네이버스포츠 비공식 API, 각 종목 독립 fallback."""
+    try:
+        doosan = _kbo()
+    except Exception:
+        doosan = ("(두산 경기 조회 실패)", "잠시 후 다시 시도해주세요", "")
+
+    try:
+        football = _epl_highlights()
+    except Exception:
+        football = "(EPL 결과 조회 실패)"
+
+    return {"doosan": doosan, "football": football}
 
 
 def get_study():
