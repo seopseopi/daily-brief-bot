@@ -7,7 +7,7 @@ get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨
 
 from datetime import date, datetime, timedelta, timezone
 
-from sources import _market, _rss
+from sources import _arxiv, _market, _rss, _translate
 from sources.assignments_data import ASSIGNMENTS
 from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
 
@@ -19,6 +19,44 @@ WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
 DOOSAN_CODE = "OB"
 NAVER_SPORTS_GAMES = "https://api-gw.sports.naver.com/schedule/games"
 EPL_BIG_CLUBS = {"맨시티", "아스널", "리버풀", "첼시", "맨유", "토트넘"}
+
+RESEARCH_KEYWORDS = [
+    "vision language model",
+    "confidence calibration",
+    "visual state tracking",
+    "hallucination",
+    "video LLM",
+    "metacognition",
+    "uncertainty",
+]
+ARXIV_CATEGORIES = ["cs.CV", "cs.CL", "cs.LG"]
+
+# "오늘의 개념" 후보 — 날짜로 하나씩 순환 (매일 같은 값 아님, 랜덤도 아님)
+GLOSSARY_CONCEPTS = [
+    ("ECE (Expected Calibration Error)", "예측 confidence를 구간으로 나눠 평균 확신도와 실제 정확도 차이를 가중평균한 값. 0에 가까울수록 잘 보정됨. Adaptive ECE, Brier score를 같이 언급하는 경우가 많음"),
+    ("Epistemic vs Aleatoric Uncertainty", "Epistemic은 모델이 몰라서 생기는 불확실성(데이터·학습으로 줄일 수 있음), Aleatoric은 데이터 자체의 노이즈로 생기는 불확실성(늘려도 안 줄어듦). 두 종류를 구분해야 불확실성 추정이 의미 있어짐"),
+    ("In-context Learning", "파라미터 업데이트 없이, 프롬프트에 넣은 예시만으로 모델이 새 태스크를 수행하는 능력. LLM 스케일이 커지면서 두드러지게 나타난 현상"),
+    ("RLHF (Reinforcement Learning from Human Feedback)", "사람이 매긴 선호도로 보상모델을 학습시키고, 그 보상모델로 LLM을 강화학습시키는 정렬(alignment) 기법. ChatGPT류 모델 후처리의 핵심 단계"),
+    ("Contrastive Learning", "같은 대상의 서로 다른 표현(augmentation)은 가깝게, 다른 대상은 멀게 임베딩 공간을 학습시키는 방법. CLIP 같은 비전-언어 정렬 모델의 기반"),
+    ("Chain-of-Thought Prompting", "정답만 바로 내지 말고 중간 추론 과정을 순서대로 생성하게 유도하는 프롬프트 기법. 복잡한 추론 태스크에서 정확도를 크게 끌어올림"),
+    ("Grounding (멀티모달)", "언어로 지칭한 대상을 이미지·비디오의 실제 픽셀/영역/시점에 정확히 대응시키는 능력. 이게 약하면 모델이 '말은 하는데 실제로 못 보는' 상태가 됨"),
+    ("Catastrophic Forgetting", "새 태스크를 학습하면서 이전에 배운 지식을 급격히 잊어버리는 현상. 연속학습(continual learning) 연구의 핵심 문제"),
+    ("Distribution Shift", "학습 데이터와 실제 배포 환경의 데이터 분포가 달라지는 상황. 모델 성능 저하와 신뢰도 오보정(calibration 붕괴)의 주요 원인"),
+    ("Self-Consistency", "같은 질문에 여러 번 샘플링해 답을 낸 뒤 다수결로 최종 답을 정하는 디코딩 전략. Chain-of-Thought와 묶어 쓰면 정확도가 오름"),
+]
+
+# "오늘의 빈출 용어" 후보 — 3개씩 순환
+GLOSSARY_TERMS = [
+    ("ablation study", "구성요소를 하나씩 빼며 기여도를 검증하는 실험. 논문 후반부에 거의 필수"),
+    ("inductive bias", "모델 구조에 내재된 가정. CNN의 지역성, Transformer의 순서 무관성이 대표 예"),
+    ("orthogonal to", '"~와는 별개 축의 문제다". 논점 분리할 때 자주 씀'),
+    ("zero-shot / few-shot", "학습 예시를 아예 안 주거나(zero-shot) 몇 개만 주고(few-shot) 바로 평가하는 세팅"),
+    ("fine-tuning", "사전학습된 모델을 특정 태스크·도메인 데이터로 추가 학습시키는 것"),
+    ("embedding", "텍스트·이미지 등을 고정 차원의 실수 벡터로 바꾼 표현. 벡터 간 거리가 의미적 유사도를 반영하도록 학습됨"),
+    ("perplexity", "언어모델이 다음 토큰을 얼마나 잘 예측하는지 나타내는 지표. 낮을수록 모델이 데이터를 잘 설명한다는 뜻"),
+    ("attention mechanism", "입력의 각 부분에 서로 다른 가중치를 줘서, 지금 필요한 정보에 더 집중하게 하는 메커니즘. Transformer의 핵심"),
+    ("benchmark", "여러 모델·방법을 같은 기준으로 비교하기 위한 표준화된 데이터셋+평가 프로토콜"),
+]
 
 YONHAP_POLITICS = "https://www.yna.co.kr/rss/politics.xml"
 YONHAP_SOCIETY = "https://www.yna.co.kr/rss/society.xml"
@@ -418,25 +456,75 @@ def get_sports():
     return {"doosan": doosan, "football": football}
 
 
+def _tr(text, cap=180):
+    """번역 실패해도 원문(영어)으로 폴백 — 섹션 하나 때문에 전체가 죽지 않게."""
+    if not text:
+        return ""
+    try:
+        return _translate.translate_en_ko(text, max_len=cap)
+    except Exception:
+        return text
+
+
+def _pick_glossary_concept():
+    idx = datetime.now(KST).date().toordinal() % len(GLOSSARY_CONCEPTS)
+    return GLOSSARY_CONCEPTS[idx]
+
+
+def _pick_glossary_terms(n=3):
+    total = len(GLOSSARY_TERMS)
+    offset = datetime.now(KST).date().toordinal() % total
+    return [GLOSSARY_TERMS[(offset + i) % total] for i in range(n)]
+
+
 def get_study():
-    """TODO: arXiv API + HF Daily Papers + LLM 요약"""
+    """arXiv에서 관심 키워드에 걸리는 최신 논문 1편을 골라 초록을 정리한다.
+
+    LLM 요약이 아니라 초록을 문장 위치로 잘라 배치하는 근사치다
+    (문제의식=첫 문장, 방법=중간, 결과=끝 문장 — 논문 초록의 흔한 서술
+    순서를 이용). 한계는 "however/limitation" 류 신호어가 있는 문장을
+    찾아 쓰고, 없으면 정직하게 "명시 없음"이라고 표시한다.
+    "내 연구와의 접점"은 추론이 아니라 실제로 매칭된 키워드를 그대로 보여준다.
+    개념/용어는 정적 용어집을 날짜로 순환한다 (LLM 호출 없음).
+    """
+    try:
+        papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=15)
+        best, matched = _arxiv.pick_best(papers, RESEARCH_KEYWORDS)
+    except Exception:
+        best, matched = None, []
+
+    if best:
+        problem, method, result, limitation = _arxiv.split_sections(best["summary"])
+        sections = [("문제의식", _tr(problem))]
+        if method:
+            sections.append(("방법", _tr(method, cap=220)))
+        if result:
+            sections.append(("결과", _tr(result)))
+        sections.append(("한계", _tr(limitation) if limitation else "초록에 명시된 한계 없음 — 원문 참고"))
+        sections.append((
+            "내 연구와의 접점",
+            f"키워드 매칭: {', '.join(matched)}" if matched else "카테고리 기준으로만 선정됨 (키워드 매칭 없음)",
+        ))
+
+        arxiv_id = best["url"].rstrip("/").rsplit("/", 1)[-1]
+        authors = best["authors"]
+        author_note = f"{authors[0]} 외 {len(authors) - 1}명" if len(authors) > 1 else (authors[0] if authors else "")
+        paper_title = best["title"]
+        paper_meta = f"arXiv:{arxiv_id}" + (f" · {author_note}" if author_note else "")
+        paper_url = best["url"]
+    else:
+        paper_title = "(arXiv 조회 실패)"
+        paper_meta = "잠시 후 다시 시도해주세요"
+        paper_url = "https://arxiv.org"
+        sections = []
+
     return {
-        "paper_title": "VLM은 자기가 틀렸다는 걸 아는가",
-        "paper_meta": "arXiv · cs.CV",
-        "paper_url": "https://arxiv.org/",
-        "paper_sections": [
-            ("문제의식", "VLM이 오답을 낼 때 confidence도 함께 낮아지는가. 모델이 자기 실패를 인지하는가를 정량 측정"),
-            ("방법", "5개 VQA 벤치마크에서 난이도 구간별 ECE 측정, hallucination 구간 분리 분석"),
-            ("결과", "난이도↑ 시 정확도만 급락하고 confidence는 유지 → 과확신 심화. uncertainty 헤드로 ECE 30% 개선"),
-            ("한계", "멀티모달 특유 요인과 텍스트 공통 요인이 분리되지 않음"),
-            ("네 연구와의 접점", "visual state tracking 실패 구간에도 동일한 측정틀 적용 가능"),
-        ],
-        "concept": ("ECE", "예측 confidence를 구간으로 나눠 평균 확신도와 실제 정확도 차이를 가중평균. 0에 가까울수록 잘 보정됨. Adaptive ECE, Brier score 병기가 관행"),
-        "terms": [
-            ("ablation study", "구성요소를 하나씩 빼며 기여도를 검증하는 실험. 논문 후반부에 거의 필수"),
-            ("inductive bias", "모델 구조에 내재된 가정. CNN의 지역성, Transformer의 순서 무관성이 대표 예"),
-            ("orthogonal to", "\"~와는 별개 축의 문제다\". 논점 분리할 때 자주 씀"),
-        ],
+        "paper_title": paper_title,
+        "paper_meta": paper_meta,
+        "paper_url": paper_url,
+        "paper_sections": sections,
+        "concept": _pick_glossary_concept(),
+        "terms": _pick_glossary_terms(),
     }
 
 
