@@ -1,4 +1,11 @@
 {
-  "last_message_id": null,
-  "assignments": []
+  "last_message_id": "1546727624699543643",
+  "assignments": [
+    {
+      "message_id": "1546727624699543643",
+      "deadline": "2026-09-14",
+      "name": "알고리즘 과제",
+      "note": ""
+    }
+  ]
 }
