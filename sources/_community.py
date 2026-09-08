@@ -78,6 +78,45 @@ def fetch_dc_top_post(gallery_id, minor=True):
     return None
 
 
+def fetch_dc_post_excerpt(post_url, max_len=140):
+    """DC 상세페이지의 JSON-LD articleBody(검색용 요약, 이미 짧게 잘려있음)를 발췌로 쓴다.
+
+    글 목록에는 본문이 없어서 상세페이지를 한 번 더 열어야 한다 — 선택된
+    글에만(보통 3개) 호출하니 부담이 크지 않다. 못 찾으면 빈 문자열.
+    """
+    raw = _get(post_url).decode("utf-8", errors="replace")
+    m = re.search(r'"articleBody":"(.*?)",\s*\n?\s*"keywords"', raw, re.S)
+    if not m:
+        return ""
+    body = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
+    if len(body) > max_len:
+        body = body[: max_len - 1].rstrip() + "…"
+    return body
+
+
+def _reddit_excerpt_from_content(content_html):
+    """레딧 목록 RSS의 content 필드에서 '자체 글' 본문만 최대한 걸러낸다.
+
+    이미지/링크 글은 썸네일+링크뿐이라 걸러내면 빈 문자열이 되고, 그 경우
+    호출부가 요약 없음으로 처리한다. 레딧에 추가 요청을 안 보내려고
+    이미 받은 응답만 재활용한다 — 레딧은 이미 IP 차단이 잦아서 요청을
+    늘리고 싶지 않다.
+    """
+    if not content_html:
+        return ""
+    text = content_html
+    text = re.sub(r"<img[^>]*>", " ", text)
+    text = re.sub(r"<a[^>]*>\s*\[link\]\s*</a>", " ", text, flags=re.I)
+    text = re.sub(r"<a[^>]*>\s*\[comments\]\s*</a>", " ", text, flags=re.I)
+    text = re.sub(r"submitted by", " ", text, flags=re.I)
+    text = re.sub(r"<a[^>]*>\s*/u/[^<]*</a>", " ", text)
+    text = re.sub(r"<table>|</table>|<tr>|</tr>|<td>|</td>", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if len(text) > 10 else ""
+
+
 def fetch_reddit_top_post(subreddit):
     """서브레딧 top/.rss (오늘 기준) 1위 글. Reddit RSS엔 점수/댓글수가 없다."""
     url = f"https://www.reddit.com/r/{subreddit}/top/.rss?limit=5&t=day"
@@ -88,8 +127,10 @@ def fetch_reddit_top_post(subreddit):
         if not _is_clean(title):
             continue
         link_el = entry.find("a:link", ATOM_NS)
+        content_el = entry.find("a:content", ATOM_NS)
         return {
             "title": title.strip(),
             "url": link_el.get("href") if link_el is not None else "",
+            "excerpt": _reddit_excerpt_from_content(content_el.text if content_el is not None else ""),
         }
     return None

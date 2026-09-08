@@ -629,12 +629,24 @@ def get_study():
     }
 
 
+def _dc_excerpt(post):
+    """선택된 디시 글만 상세페이지를 한 번 더 열어 발췌를 가져온다."""
+    try:
+        excerpt = _community.fetch_dc_post_excerpt(post["url"])
+    except Exception:
+        excerpt = ""
+    return excerpt or NO_EXCERPT_NOTE
+
+
 def get_community():
     """디시(5개 갤러리) + 레딧(2개 서브) 화제글. 조회수/댓글수 상위, 최소한의 혐오·자극 필터.
 
-    목록 페이지에는 본문이 없어서(디시 리스트, 레딧 RSS 둘 다) "디깅 요약"은
-    아직 못 넣는다 — 있는 그대로 "본문 요약 없음"이라 표시하고 더보기 링크로
-    대신한다. 갤러리/서브레딧 하나가 막혀도 나머지는 정상 출력된다.
+    디시는 선택된 글의 상세페이지에서 JSON-LD articleBody(검색용 요약,
+    이미 짧게 잘려있음)를 발췌로 쓴다. 레딧은 추가 요청 없이 목록 RSS의
+    content 필드에서 자체 글 본문만 최대한 걸러낸다 — 레딧이 이미 IP
+    차단이 잦아서 요청을 늘리지 않으려는 의도. 둘 다 못 건지면(이미지
+    글 등) 정직하게 "본문 요약 없음"으로 표시. 갤러리/서브레딧 하나가
+    막혀도 나머지는 정상 출력된다.
     """
     dc_hits = []
     for gallery_id, label in DC_GALLERIES:
@@ -658,16 +670,17 @@ def get_community():
     entries = []
     for label, post in dc_hits[:3]:
         stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
-        entries.append((label, stat, post["title"], NO_EXCERPT_NOTE, post["url"]))
+        entries.append((label, stat, post["title"], _dc_excerpt(post), post["url"]))
 
     for label, post in reddit_hits:
-        entries.append((label, "레딧 오늘의 인기글", _tr(post["title"], cap=100), NO_EXCERPT_NOTE, post["url"]))
+        excerpt = _tr(post["excerpt"], cap=140) if post.get("excerpt") else NO_EXCERPT_NOTE
+        entries.append((label, "레딧 오늘의 인기글", _tr(post["title"], cap=100), excerpt, post["url"]))
 
     for label, post in dc_hits[3:]:
         if len(entries) >= 5:
             break
         stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
-        entries.append((label, stat, post["title"], NO_EXCERPT_NOTE, post["url"]))
+        entries.append((label, stat, post["title"], _dc_excerpt(post), post["url"]))
 
     if not entries:
         entries = [("(커뮤니티 조회 실패)", "", "잠시 후 다시 시도해주세요", "", None)]
