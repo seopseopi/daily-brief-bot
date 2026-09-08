@@ -32,16 +32,21 @@ def build_header(now, context_text):
 
 
 def build_schedule():
+    """오늘 수업도 없고 마감 과제도 없으면(흔한 주말 케이스) 임베드 자체를 생략한다."""
     sc = schedule.get_schedule()
+    todos = assignments.get_assignments()
+    if not sc["events"] and not todos:
+        return None
+
     parts = []
     for time_str, name, note in sc["events"]:
         block = f"**{time_str}**  {name}"
         if note:
             block += f"\n> {note}"
         parts.append(block)
-    parts.append(f"🕐 **빈 시간**  {sc['free_slots']}")
+    if sc["events"]:
+        parts.append(f"🕐 **빈 시간**  {sc['free_slots']}")
     parts.append("\n**📝 과제**")
-    todos = assignments.get_assignments()
     if not todos:
         parts.append("_없음_")
     for days, name, note in todos:
@@ -53,16 +58,15 @@ def build_schedule():
 
 
 def build_notices():
+    """새 공지가 없는 날(대부분)은 "새 공지 없음" 임베드를 굳이 보내지 않는다."""
     items = notices.get_notices()
     if not items:
-        body = "_새 공지 없음_"
-    else:
-        parts = []
-        for label, posts in items:
-            for title, url in posts:
-                parts.append(f"**{label}**\n{title}\n-# [더보기]({url})")
-        body = "\n\n".join(parts)
-    return ds.make_embed("🎓 학사 공지", body, "notice")
+        return None
+    parts = []
+    for label, posts in items:
+        for title, url in posts:
+            parts.append(f"**{label}**\n{title}\n-# [더보기]({url})")
+    return ds.make_embed("🎓 학사 공지", "\n\n".join(parts), "notice")
 
 
 def _stock_lines(items):
@@ -139,14 +143,18 @@ def main():
 
     # 헤더의 "오늘의 세 줄"은 다른 섹션 실제 내용을 LLM에 넘겨 요약하므로,
     # 나머지 섹션을 먼저 만들고 헤더를 맨 마지막에 조립한다.
+    # 일정/학사공지는 내용이 정말 없으면 None을 돌려줘 임베드째로 뺀다.
     other_embeds = [
-        build_schedule(),
-        build_notices(),
-        build_market(),
-        build_news(),
-        build_sports(),
-        build_study(),
-        build_community(),
+        e for e in [
+            build_schedule(),
+            build_notices(),
+            build_market(),
+            build_news(),
+            build_sports(),
+            build_study(),
+            build_community(),
+        ]
+        if e is not None
     ]
     context_text = "\n\n".join(f"[{e['title']}]\n{e['description']}" for e in other_embeds)
     header_embed = build_header(now, context_text)
