@@ -7,11 +7,14 @@ get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨
 
 from datetime import date, datetime, timedelta, timezone
 
-from sources import _rss
+from sources import _market, _rss
 from sources.assignments_data import ASSIGNMENTS
 from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
 
 KST = timezone(timedelta(hours=9))
+
+HOLDINGS_KR = [("017670", "SK텔레콤"), ("009150", "삼성전기")]
+WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
 
 YONHAP_POLITICS = "https://www.yna.co.kr/rss/politics.xml"
 YONHAP_SOCIETY = "https://www.yna.co.kr/rss/society.xml"
@@ -145,31 +148,146 @@ def get_assignments():
     return result
 
 
+def _fmt_pct(x):
+    sign = "+" if x > 0 else ""
+    return f"{sign}{x:.2f}%"
+
+
+def _kr_index_and_note():
+    idx = _market.fetch_naver_quotes(["KOSPI", "KOSDAQ"])
+    kospi, kosdaq = idx["KOSPI"], idx["KOSDAQ"]
+    kr_index = f"코스피 {kospi['price']:,.2f} {_market.arrow(kospi['change_pct'])}{abs(kospi['change_pct']):.2f}%"
+    kr_note = (
+        f"코스닥 {kosdaq['price']:,.2f} {_market.arrow(kosdaq['change_pct'])}{abs(kosdaq['change_pct']):.2f}% · "
+        f"코스피 고가 {kospi['high']:,.0f} · 저가 {kospi['low']:,.0f}"
+    )
+    return kr_index, kr_note
+
+
+def _kr_holdings_and_hot():
+    """보유 종목 + 화제종목(네이버 인기검색 순위 기준, 보유 종목은 제외)."""
+    hot_pairs = _market.fetch_naver_hot_search(limit=10)
+    holding_codes = {c for c, _ in HOLDINGS_KR}
+    hot_codes = [c for c, _ in hot_pairs if c not in holding_codes][:2]
+    quotes = _market.fetch_naver_quotes([c for c, _ in HOLDINGS_KR] + hot_codes)
+
+    kr_holdings = []
+    for code, name in HOLDINGS_KR:
+        q = quotes.get(code)
+        if not q:
+            continue
+        price_str = f"{q['price']:,.0f} {_market.arrow(q['change_pct'])}{abs(q['change_pct']):.2f}%"
+        note = f"고가 {q['high']:,.0f} · 저가 {q['low']:,.0f}"
+        kr_holdings.append((name, price_str, note))
+
+    hot_name_lookup = dict(hot_pairs)
+    kr_hot = []
+    for rank, code in enumerate(hot_codes, 1):
+        q = quotes.get(code)
+        if not q:
+            continue
+        change_str = f"{_market.arrow(q['change_pct'])}{abs(q['change_pct']):.2f}%"
+        kr_hot.append((hot_name_lookup.get(code, q["name"]), change_str, f"네이버 인기검색 {rank}위"))
+
+    return kr_holdings, kr_hot
+
+
+def _us_index_and_note():
+    sp = _market.fetch_yahoo_quote("^GSPC")
+    nq = _market.fetch_yahoo_quote("^IXIC")
+    us_index = f"나스닥 {_fmt_pct(nq['change_pct'])} · S&P {_fmt_pct(sp['change_pct'])}"
+    try:
+        tnx = _market.fetch_yahoo_quote("^TNX")
+        vix = _market.fetch_yahoo_quote("^VIX")
+        us_note = f"美10년물 {tnx['price']:.2f}% · VIX {vix['price']:.1f}"
+        vix_price = vix["price"]
+    except Exception:
+        us_note = "(금리·VIX 조회 실패)"
+        vix_price = None
+    return us_index, us_note, sp, nq, vix_price
+
+
+def _us_hot():
+    out = []
+    for symbol, name in WATCH_US:
+        try:
+            q = _market.fetch_yahoo_quote(symbol)
+            note = ""
+            if q["day_high"] and q["day_low"]:
+                note = f"일중 고가 ${q['day_high']:.2f} · 저가 ${q['day_low']:.2f}"
+            out.append((name, _fmt_pct(q["change_pct"]), note))
+        except Exception:
+            out.append((name, "(조회 실패)", ""))
+    return out
+
+
+def _kr_outlook(sp, nq):
+    """국장 개장 전 참고용 — 간밤 미국 지수 흐름을 그대로 요약. 예측/추천 아님."""
+    avg = (sp["change_pct"] + nq["change_pct"]) / 2
+    if avg > 0.3:
+        label = "미국 증시 상승 마감"
+    elif avg < -0.3:
+        label = "미국 증시 하락 마감"
+    else:
+        label = "미국 증시 혼조 마감"
+    detail = (
+        f"S&P {_fmt_pct(sp['change_pct'])} · 나스닥 {_fmt_pct(nq['change_pct'])}. "
+        "국장 방향성 참고용 — 투자 조언 아님"
+    )
+    return (label, detail)
+
+
+def _us_outlook(vix_price):
+    """VIX 기준 변동성 읽기 — 매수/매도 신호 아님, 참고용 지표 설명."""
+    if vix_price is None:
+        return ("(조회 실패)", "VIX 데이터를 가져오지 못했습니다")
+    if vix_price < 15:
+        label = "변동성 낮음"
+    elif vix_price < 20:
+        label = "변동성 보통"
+    else:
+        label = "변동성 확대"
+    return (label, f"VIX {vix_price:.1f} 기준. 심리 지표 참고용 — 투자 조언 아님")
+
+
 def get_market():
-    """TODO: 네이버금융/야후파이낸스 크롤링"""
+    """네이버금융(국장) + 야후파이낸스(미장). 각 구획은 독립 fallback 처리."""
+    try:
+        kr_index, kr_note = _kr_index_and_note()
+    except Exception:
+        kr_index, kr_note = "(코스피 조회 실패)", "잠시 후 다시 시도해주세요"
+
+    try:
+        kr_holdings, kr_hot = _kr_holdings_and_hot()
+    except Exception:
+        kr_holdings, kr_hot = [], []
+
+    try:
+        us_index, us_note, sp, nq, vix_price = _us_index_and_note()
+        outlook_kr = _kr_outlook(sp, nq)
+    except Exception:
+        us_index, us_note = "(미국 지수 조회 실패)", "잠시 후 다시 시도해주세요"
+        outlook_kr = ("(조회 실패)", "미국 지수 데이터를 가져오지 못했습니다")
+        vix_price = None
+
+    try:
+        fx = _market.fetch_naver_fx()
+        fx_str = f"원/달러 {fx['USD']:,.2f} · 원/엔(100엔) {fx['JPY100']:,.2f} · 원/위안 {fx['CNY']:,.2f}"
+    except Exception:
+        fx_str = "(환율 조회 실패)"
+
     return {
-        "kr_index": "코스피 2,742 ▲0.4%",
-        "kr_note": "외인 +3,200억 순매수 · 기관 -1,100억 · 반도체가 지수 견인",
-        "kr_holdings": [
-            ("SK텔레콤", "58,400 ▲1.2%", "AI 데이터센터 투자 확대 발표. 통신 3사 중 AI 매출 비중이 가장 빠르게 증가"),
-            ("삼성전기", "152,000 ▲2.8%", "MLCC 수요 회복 신호. AI 서버·전장용 고부가 비중 확대가 실적 레버리지"),
-        ],
-        "kr_hot": [
-            ("삼성전자", "▲5.1%", "외인 3거래일만 순매수 전환. HBM4 공급 계약 기대감이 촉매"),
-            ("에코프로", "▼3.6%", "증권가 목표주가 하향. 中 저가 배터리 공세로 마진 압박"),
-        ],
-        "us_index": "나스닥 ▲0.9% · S&P ▲0.6%",
-        "us_note": "美10년물 4.12% · VIX 14.2 (변동성 낮음)",
-        "us_holdings": [
-            ("SpaceX", "비상장", "최근 라운드 밸류 상향 보도. 스타링크 매출 성장이 밸류 근거로 거론"),
-        ],
-        "us_hot": [
-            ("NVIDIA", "▲2.1%", "모레 실적 발표. 데이터센터 가이던스가 반도체 섹터 방향 좌우"),
-            ("Tesla", "▼1.8%", "분기 인도량 컨센서스 하회 우려"),
-        ],
-        "fx": "원/달러 1,338 · 원/엔 905 · 원/위안 186",
-        "outlook_kr": ("상승 우위", "간밤 미국 반도체 강세 + 외인 순매수 지속. 다만 밤 CPI 대기로 관망세, 상단 제한적"),
-        "outlook_us": ("혼조", "엔비디아 실적 기대 vs 금리 부담. CPI 결과 전까지 방향성 나오기 어려움"),
+        "kr_index": kr_index,
+        "kr_note": kr_note,
+        "kr_holdings": kr_holdings,
+        "kr_hot": kr_hot,
+        "us_index": us_index,
+        "us_note": us_note,
+        "us_holdings": [("SpaceX", "비상장", "실시간 시세 데이터 없음 (비상장사)")],
+        "us_hot": _us_hot(),
+        "fx": fx_str,
+        "outlook_kr": outlook_kr,
+        "outlook_us": _us_outlook(vix_price),
     }
 
 
