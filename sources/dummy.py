@@ -7,7 +7,7 @@ get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨
 
 from datetime import date, datetime, timedelta, timezone
 
-from sources import _arxiv, _market, _rss, _translate
+from sources import _arxiv, _community, _market, _rss, _translate
 from sources.assignments_data import ASSIGNMENTS
 from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
 
@@ -19,6 +19,16 @@ WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
 DOOSAN_CODE = "OB"
 NAVER_SPORTS_GAMES = "https://api-gw.sports.naver.com/schedule/games"
 EPL_BIG_CLUBS = {"맨시티", "아스널", "리버풀", "첼시", "맨유", "토트넘"}
+
+DC_GALLERIES = [
+    ("thesingularity", "특이점이 온다 갤"),
+    ("claude", "클로드 갤"),
+    ("chatgpt", "챗지피티 갤"),
+    ("chatgptpro", "GPT프로 갤"),
+    ("aiinformation", "AI 정보 갤"),
+]
+REDDIT_SUBS = [("LocalLLaMA", "r/LocalLLaMA"), ("ClaudeAI", "r/ClaudeAI")]
+NO_EXCERPT_NOTE = "(본문 요약 없음 — 더보기 참고)"
 
 RESEARCH_KEYWORDS = [
     "vision language model",
@@ -529,16 +539,46 @@ def get_study():
 
 
 def get_community():
-    """TODO: 디시 스크래핑 + Reddit API"""
-    return [
-        ("특이점이 온다 갤", "조회 5.8만 · 댓글 420", "데이터센터 속 AI들의 문명 논문 공유글",
-         "arXiv 원문과 함께 다중 에이전트 환경의 창발적 협력 패턴 논문 요약. 댓글에서 실험 설계 타당성 논쟁"),
-        ("클로드 갤", "조회 4.2만 · 댓글 380", "신모델 코딩 테스트 해봄 - 반응 갈림",
-         "리팩터링은 호평, 엣지케이스는 지적. 공식 벤치마크와 체감 편차 논쟁 — 벤치마크 신뢰성 이슈와 직결"),
-        ("챗지피티 갤", "조회 2.9만 · 댓글 210", "이미지 인식 오류 사례 모음",
-         "표·손글씨에서 반복 오탐 축적. 실사용 hallucination 아카이브로 참고 가치"),
-        ("AI 활용 갤", "조회 1.7만 · 댓글 150", "에이전트 스택 구성 실전 후기",
-         "툴 체이닝 실패 지점 공유. 실무 관점 uncertainty 처리 사례"),
-        ("r/LocalLLaMA", "업보트 1.8k · 댓글 240", "New open-weight VLM claims SOTA on hallucination",
-         "저자 주장 수치 재현이 어렵다는 댓글 다수. 재현성 논쟁 진행중"),
-    ]
+    """디시(5개 갤러리) + 레딧(2개 서브) 화제글. 조회수/댓글수 상위, 최소한의 혐오·자극 필터.
+
+    목록 페이지에는 본문이 없어서(디시 리스트, 레딧 RSS 둘 다) "디깅 요약"은
+    아직 못 넣는다 — 있는 그대로 "본문 요약 없음"이라 표시하고 더보기 링크로
+    대신한다. 갤러리/서브레딧 하나가 막혀도 나머지는 정상 출력된다.
+    """
+    dc_hits = []
+    for gallery_id, label in DC_GALLERIES:
+        try:
+            post = _community.fetch_dc_top_post(gallery_id)
+        except Exception:
+            post = None
+        if post:
+            dc_hits.append((label, post))
+    dc_hits.sort(key=lambda x: -x[1]["views"])
+
+    reddit_hits = []
+    for sub_id, label in REDDIT_SUBS:
+        try:
+            post = _community.fetch_reddit_top_post(sub_id)
+        except Exception:
+            post = None
+        if post:
+            reddit_hits.append((label, post))
+
+    entries = []
+    for label, post in dc_hits[:3]:
+        stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
+        entries.append((label, stat, post["title"], NO_EXCERPT_NOTE, post["url"]))
+
+    for label, post in reddit_hits:
+        entries.append((label, "레딧 오늘의 인기글", _tr(post["title"], cap=100), NO_EXCERPT_NOTE, post["url"]))
+
+    for label, post in dc_hits[3:]:
+        if len(entries) >= 5:
+            break
+        stat = f"조회 {post['views']:,} · 댓글 {post['replies']}"
+        entries.append((label, stat, post["title"], NO_EXCERPT_NOTE, post["url"]))
+
+    if not entries:
+        entries = [("(커뮤니티 조회 실패)", "", "잠시 후 다시 시도해주세요", "", None)]
+
+    return entries

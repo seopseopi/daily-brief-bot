@@ -102,8 +102,11 @@ def build_study():
 
 def build_community():
     lines = []
-    for source, stat, title, detail in src.get_community():
-        lines.append(f"**{source}** -# {stat}\n{title}\n> {detail}")
+    for source, stat, title, detail, url in src.get_community():
+        block = f"**{source}** -# {stat}\n{title}\n> {detail}"
+        if url:
+            block += f"\n-# [더보기]({url})"
+        lines.append(block)
     body = "\n\n".join(lines) + "\n\n-# 비공식 정보 · 논쟁 톤 제외하고 사실만 추출"
     return ds.make_embed("🔥 커뮤니티 펄스", body, "community")
 
