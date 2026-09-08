@@ -508,7 +508,7 @@ def get_study():
     개념/용어는 정적 용어집을 날짜로 순환한다 (LLM 호출 없음).
     """
     try:
-        papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=15)
+        papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=10)
         best, matched = _arxiv.pick_best(papers, RESEARCH_KEYWORDS)
     except Exception as e:
         print(f"[경고] arXiv 조회 실패: {type(e).__name__}: {e}")

@@ -11,7 +11,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
-TIMEOUT = 25  # export.arxiv.org가 복잡한 쿼리에는 종종 느리게 응답함
+TIMEOUT = 45  # export.arxiv.org가 복잡한 쿼리에는 종종 느리게 응답함 (25초도 부족했음)
 NS = {"a": "http://www.w3.org/2005/Atom"}
 
 LIMITATION_SIGNALS = (
