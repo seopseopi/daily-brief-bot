@@ -3,7 +3,8 @@
 from datetime import datetime, timedelta, timezone
 
 import discord_sender as ds
-from sources import dummy as src
+from sources import assignments, community, highlights, market, news, notices, schedule, sports, study
+from sources._shared import get_failures
 
 KST = timezone(timedelta(hours=9))
 WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
@@ -17,13 +18,13 @@ def dday_mark(days):
 def build_header(now, context_text):
     date_str = f"{now.month}월 {now.day}일 {WEEKDAYS[now.weekday()]}요일"
     lines = []
-    for i, (title, detail) in enumerate(src.get_highlights(context_text), 1):
+    for i, (title, detail) in enumerate(highlights.get_highlights(context_text), 1):
         num = ["1️⃣", "2️⃣", "3️⃣"][i - 1]
         lines.append(f"{num} **{title}**\n> {detail}")
 
     # 다른 섹션 + 방금 하이라이트 호출까지 쌓인 실패를 한 줄로 보여준다.
     # get_highlights()가 끝난 뒤에 모아야 그 실패도 포함된다.
-    failures = src.get_failures()
+    failures = get_failures()
     if failures:
         lines.append(f"-# ⚠️ 오늘 실패: {', '.join(failures)}")
 
@@ -31,7 +32,7 @@ def build_header(now, context_text):
 
 
 def build_schedule():
-    sc = src.get_schedule()
+    sc = schedule.get_schedule()
     parts = []
     for time_str, name, note in sc["events"]:
         block = f"**{time_str}**  {name}"
@@ -40,10 +41,10 @@ def build_schedule():
         parts.append(block)
     parts.append(f"🕐 **빈 시간**  {sc['free_slots']}")
     parts.append("\n**📝 과제**")
-    assignments = src.get_assignments()
-    if not assignments:
+    todos = assignments.get_assignments()
+    if not todos:
         parts.append("_없음_")
-    for days, name, note in assignments:
+    for days, name, note in todos:
         line = f"{dday_mark(days)} **D-{days}**  {name}"
         if note:
             line += f"\n> {note}"
@@ -52,7 +53,7 @@ def build_schedule():
 
 
 def build_notices():
-    items = src.get_notices()
+    items = notices.get_notices()
     if not items:
         body = "_새 공지 없음_"
     else:
@@ -72,7 +73,7 @@ def _stock_lines(items):
 
 
 def build_market():
-    m = src.get_market()
+    m = market.get_market()
     p = []
     p.append(f"**🇰🇷 {m['kr_index']}**\n> {m['kr_note']}")
     p.append(f"__보유__\n{_stock_lines(m['kr_holdings'])}")
@@ -93,8 +94,10 @@ def build_market():
 
 def build_news():
     lines = []
-    for tag, title, detail, url in src.get_news():
+    for tag, title, detail, url, source_note in news.get_news():
         block = f"**{tag}** {title}\n> {detail}"
+        if source_note:
+            block += f"\n-# {source_note}"
         if url:
             block += f"\n-# [더보기]({url})"
         lines.append(block)
@@ -102,14 +105,14 @@ def build_news():
 
 
 def build_sports():
-    s = src.get_sports()
+    s = sports.get_sports()
     head, detail, standing, next_game = s["doosan"]
     body = f"**{head}**\n> {detail}\n> {standing}\n> {next_game}\n\n**⚽ 해외축구**\n> {s['football']}"
     return ds.make_embed("⚾ 스포츠", body, "sports")
 
 
 def build_study():
-    st = src.get_study()
+    st = study.get_study()
     p = [f"**📄 오늘의 논문**\n[{st['paper_title']}]({st['paper_url']})\n-# {st['paper_meta']}"]
     for label, text in st["paper_sections"]:
         p.append(f"**{label}**\n> {text}")
@@ -122,7 +125,7 @@ def build_study():
 
 def build_community():
     lines = []
-    for source, stat, title, detail, url in src.get_community():
+    for source, stat, title, detail, url in community.get_community():
         block = f"**{source}** -# {stat}\n{title}\n> {detail}"
         if url:
             block += f"\n-# [더보기]({url})"
