@@ -5,13 +5,21 @@ get_schedule() / get_assignments() / get_news()는 실제 데이터로 교체됨
 함수 하나씩만 갈아끼우면 된다.
 """
 
+import json
+import os
 from datetime import date, datetime, timedelta, timezone
 
-from sources import _arxiv, _community, _llm, _market, _rss, _translate
+from sources import _arxiv, _community, _llm, _market, _notices, _rss, _translate
 from sources.assignments_data import ASSIGNMENTS
 from sources.timetable_fixed import DAY_END, DAY_START, FIXED_TIMETABLE
 
 KST = timezone(timedelta(hours=9))
+
+SEEN_NOTICES_PATH = "data/seen_notices.json"
+NOTICE_SITES = [
+    ("cs", "컴공 학사공지", _notices.fetch_cs_notices),
+    ("sw", "SW중심대 공지", _notices.fetch_sw_notices),
+]
 
 HOLDINGS_KR = [("017670", "SK텔레콤"), ("009150", "삼성전기")]
 WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
@@ -312,6 +320,54 @@ def _us_outlook(vix_price):
     return (label, f"VIX {vix_price:.1f} 기준. 심리 지표 참고용 — 투자 조언 아님")
 
 
+def _load_seen_notices():
+    try:
+        with open(SEEN_NOTICES_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_seen_notices(state):
+    os.makedirs(os.path.dirname(SEEN_NOTICES_PATH), exist_ok=True)
+    with open(SEEN_NOTICES_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def get_notices():
+    """국민대 컴공/SW 공지 중 지난번 확인 이후 새로 올라온 것만.
+
+    data/seen_notices.json에 마지막으로 본 글 ID를 저장해두고 비교한다.
+    이 파일은 main.py 실행 후 워크플로우가 매번 커밋해줘야 상태가
+    유지된다 — 안 그러면 매일 "전부 새 글"로 나옴.
+    사이트를 처음 추가한 시점(state에 그 키가 아예 없음)에는 기존 글을
+    전부 새 글로 쏟아내지 않도록, 그 회차엔 목록만 저장하고 넘어간다.
+    """
+    state = _load_seen_notices()
+    new_state = {}
+    new_by_site = []
+
+    for key, label, fetch_fn in NOTICE_SITES:
+        try:
+            current = fetch_fn()
+        except Exception as e:
+            print(f"[경고] {label} 조회 실패: {type(e).__name__}: {e}")
+            new_state[key] = state.get(key, [])
+            continue
+
+        is_first_run = key not in state
+        seen_ids = set(state.get(key, []))
+        if not is_first_run:
+            new_items = [(title, url) for (post_id, title, url) in current if post_id not in seen_ids]
+            if new_items:
+                new_by_site.append((label, new_items))
+
+        new_state[key] = [post_id for post_id, _title, _url in current[:60]]
+
+    _save_seen_notices(new_state)
+    return new_by_site
+
+
 def get_market():
     """네이버금융(국장) + 야후파이낸스(미장). 각 구획은 독립 fallback 처리."""
     try:
@@ -397,12 +453,30 @@ def _doosan_line(game):
     return f"두산 {mine}-{theirs} {opp} ({outcome})"
 
 
-def _kbo():
-    """두산 최근 경기 결과 + 다음 경기 일정.
+def _kbo_standings():
+    """두산 순위 · 승무패 · 5강 게임차. 네이버스포츠 시즌 통계 API."""
+    year = datetime.now(KST).year
+    url = f"https://api-gw.sports.naver.com/statistics/categories/kbo/seasons/{year}/teams"
+    teams = _market.fetch_json(url)["result"]["seasonTeamStats"]
+    by_rank = {t["ranking"]: t for t in teams}
+    doosan = next(t for t in teams if t["teamId"] == DOOSAN_CODE)
 
-    네이버스포츠 비공식 API. 시즌 순위/게임차를 주는 무료 엔드포인트를
-    찾지 못해 그 부분은 뺐다 — 필요하면 나중에 추가.
-    """
+    record = f"{doosan['winGameCount']}승 {doosan['drawnGameCount']}무 {doosan['loseGameCount']}패"
+    rank = doosan["ranking"]
+    if rank <= 5:
+        sixth = by_rank.get(6)
+        cushion = (sixth["gameBehind"] - doosan["gameBehind"]) if sixth else 0
+        zone = f"5강권 (6위와 +{cushion:.1f}G)"
+    else:
+        fifth = by_rank.get(5)
+        gap = (doosan["gameBehind"] - fifth["gameBehind"]) if fifth else 0
+        zone = f"5강 -{gap:.1f}G"
+
+    return f"{rank}위 ({record}) · {zone}"
+
+
+def _kbo():
+    """두산 최근 경기 결과 + 순위/게임차 + 다음 경기 일정. 네이버스포츠 비공식 API."""
     today = datetime.now(KST).date()
     url = (
         f"{NAVER_SPORTS_GAMES}?fields=basic,score&size=50"
@@ -432,7 +506,13 @@ def _kbo():
     else:
         next_game = "(예정된 경기 없음)"
 
-    return (head, detail, next_game)
+    try:
+        standing = _kbo_standings()
+    except Exception as e:
+        print(f"[경고] KBO 순위 조회 실패: {type(e).__name__}: {e}")
+        standing = "(순위 조회 실패)"
+
+    return (head, detail, standing, next_game)
 
 
 def _epl_highlights(limit=2):
@@ -466,7 +546,7 @@ def get_sports():
     try:
         doosan = _kbo()
     except Exception:
-        doosan = ("(두산 경기 조회 실패)", "잠시 후 다시 시도해주세요", "")
+        doosan = ("(두산 경기 조회 실패)", "잠시 후 다시 시도해주세요", "", "")
 
     try:
         football = _epl_highlights()

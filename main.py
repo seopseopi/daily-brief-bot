@@ -44,6 +44,19 @@ def build_schedule():
     return ds.make_embed("📅 일정 · 과제", "\n\n".join(parts), "schedule")
 
 
+def build_notices():
+    items = src.get_notices()
+    if not items:
+        body = "_새 공지 없음_"
+    else:
+        parts = []
+        for label, posts in items:
+            for title, url in posts:
+                parts.append(f"**{label}**\n{title}\n-# [더보기]({url})")
+        body = "\n\n".join(parts)
+    return ds.make_embed("🎓 학사 공지", body, "notice")
+
+
 def _stock_lines(items):
     out = []
     for name, price, note in items:
@@ -83,8 +96,8 @@ def build_news():
 
 def build_sports():
     s = src.get_sports()
-    head, detail, standing = s["doosan"]
-    body = f"**{head}**\n> {detail}\n> {standing}\n\n**⚽ 해외축구**\n> {s['football']}"
+    head, detail, standing, next_game = s["doosan"]
+    body = f"**{head}**\n> {detail}\n> {standing}\n> {next_game}\n\n**⚽ 해외축구**\n> {s['football']}"
     return ds.make_embed("⚾ 스포츠", body, "sports")
 
 
@@ -118,6 +131,7 @@ def main():
     # 나머지 섹션을 먼저 만들고 헤더를 맨 마지막에 조립한다.
     other_embeds = [
         build_schedule(),
+        build_notices(),
         build_market(),
         build_news(),
         build_sports(),

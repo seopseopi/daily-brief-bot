@@ -16,6 +16,7 @@ USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot
 COLORS = {
     "header": 0x5865F2,
     "schedule": 0x248046,
+    "notice": 0x1ABC9C,
     "market": 0xC27C0E,
     "news": 0x5C5E66,
     "sports": 0xC0392B,
