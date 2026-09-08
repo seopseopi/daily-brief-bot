@@ -138,7 +138,8 @@ def get_highlights(context_text=""):
     """
     try:
         return _llm.summarize_highlights(context_text)
-    except Exception:
+    except Exception as e:
+        print(f"[경고] LLM 요약 실패: {type(e).__name__}: {e}")
         return [("오늘의 세 줄 요약 실패", "아래 섹션을 직접 확인해주세요 — LLM 호출이 안 됐습니다")]
 
 
@@ -503,7 +504,8 @@ def get_study():
     try:
         papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=15)
         best, matched = _arxiv.pick_best(papers, RESEARCH_KEYWORDS)
-    except Exception:
+    except Exception as e:
+        print(f"[경고] arXiv 조회 실패: {type(e).__name__}: {e}")
         best, matched = None, []
 
     if best:
