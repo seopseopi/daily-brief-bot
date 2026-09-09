@@ -4,6 +4,7 @@ from sources import _market
 from sources._shared import fail
 
 HOLDINGS_KR = [("017670", "SK텔레콤"), ("009150", "삼성전기")]
+HOLDINGS_US = [("SPCX", "SpaceX")]  # 2026년 상장 (NASDAQ) — 비상장 시절 하드코딩 문구는 폐기
 WATCH_US = [("NVDA", "NVIDIA"), ("TSLA", "Tesla")]
 
 
@@ -82,6 +83,22 @@ def _us_hot():
     return out
 
 
+def _us_holdings():
+    out = []
+    for symbol, name in HOLDINGS_US:
+        try:
+            q = _market.fetch_yahoo_quote(symbol)
+            price_str = f"${q['price']:,.2f} {_fmt_pct(q['change_pct'])}"
+            note = ""
+            if q["day_high"] and q["day_low"]:
+                note = f"일중 고가 ${q['day_high']:.2f} · 저가 ${q['day_low']:.2f}"
+            out.append((name, price_str, note))
+        except Exception:
+            fail(f"보유종목(미장:{name})")
+            out.append((name, "(조회 실패)", ""))
+    return out
+
+
 def _kr_outlook(sp, nq):
     """국장 개장 전 참고용 — 간밤 미국 지수 흐름을 그대로 요약. 예측/추천 아님."""
     avg = (sp["change_pct"] + nq["change_pct"]) / 2
@@ -148,7 +165,7 @@ def get_market():
         "kr_hot": kr_hot,
         "us_index": us_index,
         "us_note": us_note,
-        "us_holdings": [("SpaceX", "비상장", "실시간 시세 데이터 없음 (비상장사)")],
+        "us_holdings": _us_holdings(),
         "us_hot": _us_hot(),
         "fx": fx_str,
         "outlook_kr": outlook_kr,
