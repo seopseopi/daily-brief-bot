@@ -1,10 +1,34 @@
 {
-  "last_message_id": "1546727624699543643",
+  "last_message_id": "1547810516964220990",
   "assignments": [
     {
       "message_id": "1546727624699543643",
       "deadline": "2026-09-14",
       "name": "알고리즘 과제",
+      "note": ""
+    },
+    {
+      "message_id": "1547793981138534511",
+      "deadline": "2026-09-14",
+      "name": "컴퓨터 구조 과제",
+      "note": ""
+    },
+    {
+      "message_id": "1547810180048232509",
+      "deadline": "2026-09-13",
+      "name": "실전프로젝트 과제",
+      "note": ""
+    },
+    {
+      "message_id": "1547810286768099329",
+      "deadline": "2026-09-20",
+      "name": "키로톤",
+      "note": ""
+    },
+    {
+      "message_id": "1547810516964220990",
+      "deadline": "2026-10-03",
+      "name": "국민대 AI Builder Challenge 2026",
       "note": ""
     }
   ]
