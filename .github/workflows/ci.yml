@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['data/**']
+  pull_request:
+    paths-ignore: ['data/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 회귀 테스트
+        run: python -m unittest discover -s tests -q
+      - name: 공개 데모 재현 확인
+        run: |
+          python main.py --demo --format markdown --output /tmp/brief-demo.md
+          diff -u docs/preview.md /tmp/brief-demo.md
+          python main.py --demo --format html --output /tmp/brief-demo.html

@@ -4,7 +4,7 @@
 LLM이 없거나 실패하면 각각 자체 폴백으로 조용히 내려간다.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sources import _arxiv, _llm
 from sources._shared import KST, fail, tr
@@ -21,13 +21,7 @@ RESEARCH_KEYWORDS = [
 ]
 ARXIV_CATEGORIES = ["cs.CV", "cs.CL", "cs.LG"]
 
-# LLM도 없고 그날 논문도 없을 때만 쓰는 최종 폴백 — 아주 드문 경우.
-FALLBACK_CONCEPT = ("ECE (Expected Calibration Error)", "예측 confidence를 구간으로 나눠 평균 확신도와 실제 정확도 차이를 가중평균한 값. 0에 가까울수록 잘 보정됨.")
-FALLBACK_TERMS = [
-    ("ablation study", "구성요소를 하나씩 빼며 기여도를 검증하는 실험. 논문 후반부에 거의 필수"),
-    ("inductive bias", "모델 구조에 내재된 가정. CNN의 지역성, Transformer의 순서 무관성이 대표 예"),
-    ("zero-shot / few-shot", "학습 예시를 아예 안 주거나(zero-shot) 몇 개만 주고(few-shot) 바로 평가하는 세팅"),
-]
+MAX_PAPER_AGE = timedelta(days=7)
 
 
 def _paper_sections_via_llm(best):
@@ -56,12 +50,12 @@ def _paper_sections_heuristic(best, matched):
     실제로 매칭된 키워드를 그대로 보여준다(추론 아님).
     """
     problem, method, result, limitation = _arxiv.split_sections(best["summary"])
-    sections = [("문제의식", tr(problem))]
+    sections = [("초록 발췌 · 문제", tr(problem))]
     if method:
-        sections.append(("방법", tr(method, cap=220)))
+        sections.append(("초록 발췌 · 방법", tr(method, cap=220)))
     if result:
-        sections.append(("결과", tr(result)))
-    sections.append(("한계", tr(limitation) if limitation else "초록에 명시된 한계 없음 — 원문 참고"))
+        sections.append(("초록 발췌 · 결과", tr(result)))
+    sections.append(("초록 발췌 · 한계", tr(limitation) if limitation else "초록에서 명시적 한계 문장을 찾지 못함 — 원문 참고"))
     sections.append((
         "내 연구와의 접점",
         f"키워드 매칭: {', '.join(matched)}" if matched else "카테고리 기준으로만 선정됨 (키워드 매칭 없음)",
@@ -70,7 +64,7 @@ def _paper_sections_heuristic(best, matched):
 
 
 def _glossary(best):
-    """오늘 논문에서 LLM이 실제로 뽑은 개념/용어. 없으면 최종 폴백 1세트."""
+    """오늘 논문에서 LLM이 실제로 뽑은 개념/용어. 실패하면 정직하게 생략."""
     if best:
         try:
             g = _llm.generate_glossary(best["title"], best["summary"])
@@ -78,9 +72,9 @@ def _glossary(best):
             terms = [(t["term"], t["desc"]) for t in g["terms"]]
             return concept, terms
         except Exception as e:
-            print(f"[경고] 개념/용어 생성(LLM) 실패: {type(e).__name__}: {e}")
+            print(f"[경고] 개념/용어 생성(LLM) 실패: {type(e).__name__}")
             fail("개념·용어(LLM)")
-    return FALLBACK_CONCEPT, FALLBACK_TERMS
+    return None, []
 
 
 def get_study():
@@ -91,31 +85,42 @@ def get_study():
     """
     try:
         papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=10)
+        now = datetime.now(KST)
+        papers = [
+            paper for paper in papers
+            if paper.get("published_at")
+            and timedelta(0) <= now - paper["published_at"].astimezone(KST) <= MAX_PAPER_AGE
+        ]
         best, matched = _arxiv.pick_best(papers, RESEARCH_KEYWORDS)
     except Exception as e:
-        print(f"[경고] arXiv 조회 실패: {type(e).__name__}: {e}")
+        print(f"[경고] arXiv 조회 실패: {type(e).__name__}")
         fail("arXiv 논문")
         best, matched = None, []
 
     if best:
         try:
             sections = _paper_sections_via_llm(best)
+            summary_kind = "ai"
         except Exception as e:
-            print(f"[경고] 논문 LLM 요약 실패: {type(e).__name__}: {e}")
+            print(f"[경고] 논문 LLM 요약 실패: {type(e).__name__}")
             fail("논문 요약(LLM)")
             sections = _paper_sections_heuristic(best, matched)
+            summary_kind = "abstract_excerpt"
 
         arxiv_id = best["url"].rstrip("/").rsplit("/", 1)[-1]
         authors = best["authors"]
         author_note = f"{authors[0]} 외 {len(authors) - 1}명" if len(authors) > 1 else (authors[0] if authors else "")
         paper_title = best["title"]
-        paper_meta = f"arXiv:{arxiv_id}" + (f" · {author_note}" if author_note else "")
+        published = best.get("published_at")
+        date_note = f" · {published.astimezone(KST):%Y-%m-%d} 등록" if published else ""
+        paper_meta = f"arXiv:{arxiv_id}{date_note}" + (f" · {author_note}" if author_note else "")
         paper_url = best["url"]
     else:
         paper_title = "(arXiv 조회 실패)"
         paper_meta = "잠시 후 다시 시도해주세요"
         paper_url = "https://arxiv.org"
         sections = []
+        summary_kind = "unavailable"
 
     concept, terms = _glossary(best)
 
@@ -126,4 +131,5 @@ def get_study():
         "paper_sections": sections,
         "concept": concept,
         "terms": terms,
+        "summary_kind": summary_kind,
     }

@@ -7,6 +7,9 @@
 """
 
 from datetime import timedelta, timezone
+from threading import Lock
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from sources import _translate
 
@@ -14,17 +17,36 @@ KST = timezone(timedelta(hours=9))
 
 # 프로세스가 한 번 뜨고 끝나는 배치 스크립트라 모듈 전역 리스트로 충분하다.
 _FAILURES = []
+_FAILURES_LOCK = Lock()
+_LOCAL_FAILURES = ContextVar("source_failures", default=None)
 
 
 def fail(label):
-    _FAILURES.append(label)
+    local = _LOCAL_FAILURES.get()
+    if local is not None and label not in local:
+        local.append(label)
+    with _FAILURES_LOCK:
+        if label not in _FAILURES:
+            _FAILURES.append(label)
+
+
+@contextmanager
+def capture_failures():
+    """Track degraded fallbacks per worker as well as in the brief header."""
+    labels = []
+    token = _LOCAL_FAILURES.set(labels)
+    try:
+        yield labels
+    finally:
+        _LOCAL_FAILURES.reset(token)
 
 
 def get_failures():
     """이번 실행에서 쌓인 실패 라벨을 반환하고 비운다."""
     global _FAILURES
-    out = _FAILURES
-    _FAILURES = []
+    with _FAILURES_LOCK:
+        out = _FAILURES
+        _FAILURES = []
     return out
 
 

@@ -1,120 +1,136 @@
-"""뉴스 섹션 — 연합뉴스/한경 RSS 최신 1건씩. 정치는 두 매체 교차확인.
+"""Fresh, source-attributed current-affairs headlines.
 
-반환 튜플은 (라벨, 제목, 배경설명, 링크, 소식통표시) 5개.
-"소식통표시"는 정치 카테고리에서만 쓰는 "연합뉴스·한경 동시 보도" /
-"단일 매체 확인" 마커 — LLM이 배경설명(detail)을 덮어써도 이 필드는
-따로 있어서 안 사라진다 (예전엔 detail 문자열 안에 섞어놨다가 LLM
-배경설명으로 통째로 덮어써서 사라지는 회귀가 있었음).
+This module deliberately keeps the publisher-written headline and lead. An LLM
+is not allowed to add background facts; factual compression belongs downstream
+and remains opt-in. "Related coverage" means title-level topic similarity, not
+fact-checking, and is labelled as such.
 """
 
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import settings
 from sources import _llm, _rss
-from sources._shared import fail
+from sources._shared import KST, fail
 
 YONHAP_POLITICS = "https://www.yna.co.kr/rss/politics.xml"
+YONHAP_ECONOMY = "https://www.yna.co.kr/rss/economy.xml"
 YONHAP_SOCIETY = "https://www.yna.co.kr/rss/society.xml"
 YONHAP_INTERNATIONAL = "https://www.yna.co.kr/rss/international.xml"
 YONHAP_CULTURE = "https://www.yna.co.kr/rss/culture.xml"
 HANKYUNG_POLITICS = "https://www.hankyung.com/feed/politics"
-HANKYUNG_IT = "https://www.hankyung.com/feed/it"  # 연합뉴스엔 IT/과학 전용 피드가 없음
+HANKYUNG_IT = "https://www.hankyung.com/feed/it"
 
-CROSSCHECK_THRESHOLD = 0.34  # 제목 토큰 겹침 비율 — 이 이상이면 "동시 보도"로 간주
-DETAIL_MAX_LEN = 140
-
-
-def _single_category(label, feed_url, fallback_note):
-    """한 매체·한 카테고리에서 최신 1건을 뽑는다. 실패 시 예외를 던진다."""
-    items = _rss.fetch_rss(feed_url)
-    if not items:
-        raise RuntimeError("empty feed")
-    top = items[0]
-    detail = _rss.clean_text(top["description"], DETAIL_MAX_LEN) or fallback_note
-    return [label, top["title"], detail, top["link"], ""]
+DETAIL_MAX_LEN = 180
+FUTURE_TOLERANCE = timedelta(minutes=20)
+CATEGORIES = (
+    ("🏛️ 정치", YONHAP_POLITICS, "연합뉴스"),
+    ("💼 경제", YONHAP_ECONOMY, "연합뉴스"),
+    ("🏙️ 사회", YONHAP_SOCIETY, "연합뉴스"),
+    ("🌏 국제", YONHAP_INTERNATIONAL, "연합뉴스"),
+    ("🔬 과기", HANKYUNG_IT, "한국경제"),
+    ("🎬 문화", YONHAP_CULTURE, "연합뉴스"),
+)
 
 
-def _politics_crosschecked():
-    """정치는 연합뉴스·한경 두 매체 제목을 비교해 겹치는 이슈를 우선 채택한다.
+def _fresh(items: list[dict], now: datetime) -> list[dict]:
+    oldest = now - timedelta(hours=settings.NEWS_MAX_AGE_HOURS)
+    result = []
+    for item in items:
+        published = item.get("published_at")
+        if not published or not item.get("title") or not item.get("link"):
+            continue
+        published = published.astimezone(KST)
+        if oldest <= published <= now + FUTURE_TOLERANCE:
+            item = dict(item)
+            item["published_at"] = published
+            result.append(item)
+    return sorted(result, key=lambda item: item["published_at"], reverse=True)
 
-    형태소 분석기 없이 쓰는 근사치 교차검증이라, 실패하면 조용히
-    단일 매체(연합뉴스) 1건으로 낮춰서 보여준다 — 논평 없이 사실만.
-    """
+
+def _read_category(
+    label: str,
+    feed_url: str,
+    publisher: str,
+    now: datetime,
+    excluded_urls: set[str] | None = None,
+) -> dict:
+    candidates = _fresh(_rss.fetch_rss(feed_url), now)
+    if excluded_urls:
+        candidates = [item for item in candidates if item["link"] not in excluded_urls]
+    if not candidates:
+        raise RuntimeError("no fresh timestamped article")
+    top = candidates[0]
+    lead = _rss.clean_text(top["description"], DETAIL_MAX_LEN)
+    return {
+        "label": label,
+        "title": top["title"],
+        "detail": lead or "요약은 원문에서 확인하세요.",
+        "url": top["link"],
+        "publisher": publisher,
+        "published_at": top["published_at"],
+        "related": None,
+        "summary_kind": "publisher_lead" if lead else "headline_only",
+        "status": "fresh",
+    }
+
+
+def _add_related_politics(primary: dict, now: datetime) -> None:
+    """Attach a genuinely similar second headline without calling it verified."""
     try:
-        yh_items = _rss.fetch_rss(YONHAP_POLITICS)[:8]
+        other_items = _fresh(_rss.fetch_rss(HANKYUNG_POLITICS), now)[:12]
     except Exception:
-        yh_items = []
-    try:
-        hk_items = _rss.fetch_rss(HANKYUNG_POLITICS)[:8]
-    except Exception:
-        hk_items = []
-
-    if not yh_items and not hk_items:
-        raise RuntimeError("정치 RSS 둘 다 실패")
-
-    if yh_items and hk_items:
-        best, best_score = None, 0.0
-        for y in yh_items:
-            y_tokens = _rss.title_tokens(y["title"])
-            for h in hk_items:
-                score = _rss.overlap_ratio(y_tokens, _rss.title_tokens(h["title"]))
-                if score > best_score:
-                    best_score, best = score, y
-        if best and best_score >= CROSSCHECK_THRESHOLD:
-            detail = _rss.clean_text(best["description"], DETAIL_MAX_LEN) or "연합뉴스·한경 동시 보도"
-            return ["🏛️ 정치", best["title"], detail, best["link"], "연합뉴스·한경 동시 보도"]
-
-    top = yh_items[0] if yh_items else hk_items[0]
-    detail = _rss.clean_text(top["description"], DETAIL_MAX_LEN) or "단일 매체 확인"
-    return ["🏛️ 정치", top["title"], detail, top["link"], "단일 매체 확인"]
+        return
+    primary_tokens = _rss.title_tokens(primary["title"])
+    best = None
+    best_score = 0.0
+    for item in other_items:
+        other_tokens = _rss.title_tokens(item["title"])
+        common = primary_tokens & other_tokens
+        score = _rss.overlap_ratio(primary_tokens, other_tokens)
+        # Requiring two shared content tokens avoids one generic word being
+        # presented as independent corroboration.
+        if len(common) >= 2 and score > best_score:
+            best, best_score = item, score
+    if best is not None and best_score >= 0.45:
+        primary["related"] = {
+            "publisher": "한국경제",
+            "title": best["title"],
+            "url": best["link"],
+            "published_at": best["published_at"],
+        }
 
 
-def get_news():
-    """각 카테고리는 독립적으로 fallback 처리한다 — 하나가 실패해도
-    나머지 카테고리는 정상 출력되고, 브리핑 전체는 깨지지 않는다.
-
-    조회에 성공한 카테고리들은 한 번의 LLM 호출로 "왜 중요한지" 배경
-    설명을 받아 detail을 덮어쓴다. LLM이 없거나 실패하면 RSS 리드문을
-    그대로 쓴다.
-    """
+def get_news(now: datetime | None = None) -> list[dict]:
+    now = (now or datetime.now(KST)).astimezone(KST)
     results = []
-    try:
-        results.append(_politics_crosschecked())
-    except Exception:
-        fail("뉴스-정치")
-        results.append(["🏛️ 정치", "(연합뉴스·한경 접속 실패)", "잠시 후 다시 시도해주세요", None, ""])
-
-    try:
-        results.append(_single_category("🏙️ 사회", YONHAP_SOCIETY, "(요약 없음 — 원문 참고)"))
-    except Exception:
-        fail("뉴스-사회")
-        results.append(["🏙️ 사회", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None, ""])
-
-    try:
-        results.append(_single_category("🌏 국제", YONHAP_INTERNATIONAL, "(요약 없음 — 원문 참고)"))
-    except Exception:
-        fail("뉴스-국제")
-        results.append(["🌏 국제", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None, ""])
-
-    try:
-        # 한경 IT 피드는 <description>이 없어 제목만 온다.
-        results.append(_single_category("🔬 과기", HANKYUNG_IT, "(요약 없음 — 원문 참고)"))
-    except Exception:
-        fail("뉴스-과기")
-        results.append(["🔬 과기", "(한경 접속 실패)", "잠시 후 다시 시도해주세요", None, ""])
-
-    try:
-        results.append(_single_category("🎬 문화", YONHAP_CULTURE, "(요약 없음 — 원문 참고)"))
-    except Exception:
-        fail("뉴스-문화")
-        results.append(["🎬 문화", "(연합뉴스 접속 실패)", "잠시 후 다시 시도해주세요", None, ""])
-
-    ok_indices = [i for i, r in enumerate(results) if r[3]]  # link 있으면 = 조회 성공
-    if ok_indices:
+    seen_urls = set()
+    for label, feed_url, publisher in CATEGORIES:
         try:
-            items_for_llm = [{"label": results[i][0], "title": results[i][1], "lead": results[i][2]} for i in ok_indices]
-            explanations = _llm.explain_news(items_for_llm)
-            for idx, exp in zip(ok_indices, explanations):
-                results[idx][2] = exp  # detail만 덮어씀 — source_note(4번째)는 그대로
-        except Exception as e:
-            print(f"[경고] 뉴스 배경설명(LLM) 실패: {type(e).__name__}: {e}")
-            fail("뉴스 배경설명(LLM)")
+            item = _read_category(label, feed_url, publisher, now, seen_urls)
+            results.append(item)
+            seen_urls.add(item["url"])
+        except Exception as exc:
+            print(f"[경고] 뉴스 {label} 조회 실패: {type(exc).__name__}")
+            fail(f"뉴스-{label.split()[-1]}")
 
-    return [tuple(r) for r in results]
+    politics = next((item for item in results if item["label"] == "🏛️ 정치"), None)
+    if politics:
+        _add_related_politics(politics, now)
+
+    if settings.USE_LLM_NEWS_SUMMARIES and results:
+        try:
+            prompts = [
+                {"label": item["label"], "title": item["title"], "lead": item["detail"]}
+                for item in results
+            ]
+            summaries = _llm.explain_news(prompts)
+            for item, summary in zip(results, summaries):
+                item["detail"] = summary
+                item["summary_kind"] = "ai_summary_of_publisher_lead"
+        except Exception as exc:
+            print(f"[경고] 뉴스 요약(LLM) 실패: {type(exc).__name__}")
+            fail("뉴스 요약(LLM)")
+
+    return results

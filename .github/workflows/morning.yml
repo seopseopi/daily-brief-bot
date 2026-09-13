@@ -2,13 +2,15 @@ name: 아침 브리핑
 
 on:
   schedule:
-    # UTC 22:13 = KST 07:13 (다음날).
-    # 목표는 07:30이지만, GitHub Actions 무료 스케줄러는 정각/정시 30분처럼
-    # 몰리는 시각에 실행이 몇 시간씩 밀릴 수 있어(공식 문서 경고 사항)
-    # 애매한 분(13분)으로 옮기고 여유 버퍼(17분)를 뒀다. 그래도 100% 정시
-    # 보장은 안 됨 — GitHub Actions 스케줄 트리거 자체의 한계.
-    - cron: "13 22 * * *"
+    # 07:30 KST와 10/20분 뒤 복구 기회를 함께 예약한다. 첫 성공만
+    # data/delivery_state.json에 기록하므로 후속 실행은 중복 전송하지 않는다.
+    # GitHub Actions cron 자체는 정시 실행 SLA가 없다는 점은 README 참고.
+    - cron: "30,40,50 22 * * *"
   workflow_dispatch:  # 수동 실행 버튼
+
+concurrency:
+  group: morning-brief-delivery
+  cancel-in-progress: false
 
 permissions:
   contents: write  # data/seen_notices.json 커밋에 필요
@@ -16,29 +18,50 @@ permissions:
 jobs:
   brief:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: 대기 중 반영된 최신 전송 상태 가져오기
+        run: git pull --ff-only origin main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - name: 의존성 설치
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+      - name: 단위 테스트
+        run: python -m unittest discover -s tests -q
       - name: 브리핑 전송
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           ASSIGNMENT_CHANNEL_ID: ${{ secrets.ASSIGNMENT_CHANNEL_ID }}
+          CALENDAR_ICS_URLS: ${{ secrets.CALENDAR_ICS_URLS }}
+          FIXED_TIMETABLE_JSON: ${{ secrets.FIXED_TIMETABLE_JSON }}
+          MARKET_HOLDINGS_KR: ${{ secrets.MARKET_HOLDINGS_KR }}
+          MARKET_HOLDINGS_US: ${{ secrets.MARKET_HOLDINGS_US }}
+          BRIEF_LOCATION_NAME: ${{ secrets.BRIEF_LOCATION_NAME || vars.BRIEF_LOCATION_NAME }}
+          BRIEF_LATITUDE: ${{ secrets.BRIEF_LATITUDE || vars.BRIEF_LATITUDE }}
+          BRIEF_LONGITUDE: ${{ secrets.BRIEF_LONGITUDE || vars.BRIEF_LONGITUDE }}
+          BRIEF_SECTIONS: ${{ vars.BRIEF_SECTIONS }}
+          BRIEF_MODE: ${{ vars.BRIEF_MODE }}
+          INCLUDE_FIXED_TIMETABLE: ${{ vars.INCLUDE_FIXED_TIMETABLE }}
+          NEWS_MAX_AGE_HOURS: ${{ vars.NEWS_MAX_AGE_HOURS }}
+          COMMUNITY_MAX_AGE_HOURS: ${{ vars.COMMUNITY_MAX_AGE_HOURS }}
+          ASSIGNMENT_HISTORY_LIMIT: ${{ vars.ASSIGNMENT_HISTORY_LIMIT }}
+          USE_LLM_NEWS_SUMMARIES: ${{ vars.USE_LLM_NEWS_SUMMARIES }}
+          USE_LLM_COMMUNITY_SUMMARIES: ${{ vars.USE_LLM_COMMUNITY_SUMMARIES }}
         run: python main.py
-      - name: 공지·과제 확인 상태 저장
+      - name: 공지·전송 상태 저장
         run: |
-          if ! git diff --quiet -- data/seen_notices.json data/discord_assignments.json; then
+          git add data/seen_notices.json data/delivery_state.json
+          if ! git diff --cached --quiet -- data/seen_notices.json data/delivery_state.json; then
             git config user.name "morning-brief-bot"
             git config user.email "actions@users.noreply.github.com"
-            git add data/seen_notices.json data/discord_assignments.json
-            git commit -m "chore: 학사공지·과제 확인 상태 업데이트 [skip ci]"
+            git commit -m "chore: 아침 브리핑 상태 업데이트 [skip ci]"
             git push
           fi

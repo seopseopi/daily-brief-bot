@@ -13,14 +13,22 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
-TIMEOUT = 45  # export.arxiv.org가 복잡한 쿼리에는 종종 느리게 응답함 (25초도 부족했음)
-RETRIES = 3
-RETRY_BACKOFF = 4  # 초. 시도마다 배로 늘림 (4s, 8s)
+TIMEOUT = 25
+RETRIES = 2
+RETRY_BACKOFF = 3
 NS = {"a": "http://www.w3.org/2005/Atom"}
 
 LIMITATION_SIGNALS = (
-    "however", "limitation", "limited", "still", "remain", "future work",
+    "however", "limitation", "limited", "future work",
     "despite", "challenge", "fail", "struggle", "drawback",
+)
+RESULT_SIGNALS = (
+    "we show", "we find", "we demonstrate", "our results", "results show",
+    "achieves", "outperform", "improves", "we observe", "experiments show",
+)
+METHOD_SIGNALS = (
+    "we propose", "we introduce", "we present", "our method", "our approach",
+    "we develop", "we use", "we train",
 )
 
 
@@ -31,7 +39,7 @@ def search(keywords, categories, max_results=15):
     kw_clause = " OR ".join(f'abs:"{k}"' for k in keywords)
     query = f"({cat_clause}) AND ({kw_clause})"
     url = (
-        "http://export.arxiv.org/api/query?"
+        "https://export.arxiv.org/api/query?"
         + urllib.parse.urlencode({
             "search_query": query,
             "sortBy": "submittedDate",
@@ -60,8 +68,10 @@ def search(keywords, categories, max_results=15):
         papers.append({
             "title": " ".join(entry.find("a:title", NS).text.split()),
             "summary": " ".join(entry.find("a:summary", NS).text.split()),
-            "url": entry.find("a:id", NS).text.strip(),
+            "url": entry.find("a:id", NS).text.strip().replace("http://", "https://", 1),
             "authors": [a.find("a:name", NS).text for a in entry.findall("a:author", NS)],
+            "published_at": _atom_datetime(entry.findtext("a:published", default="", namespaces=NS)),
+            "updated_at": _atom_datetime(entry.findtext("a:updated", default="", namespaces=NS)),
         })
     return papers
 
@@ -84,20 +94,24 @@ def pick_best(papers, keywords):
 
 
 def split_sections(summary):
-    """초록을 문장 단위로 잘라 (문제의식, 방법, 결과, 한계) 영어 원문 조각으로 나눈다."""
+    """초록 문장에서 명시적 신호어로 문제/방법/결과/한계를 찾는다.
+
+    신호어가 없으면 빈 값을 반환한다. 마지막 문장을 무조건 '결과'로
+    간주하면 코드 공개나 향후 계획을 연구 결과로 오인할 수 있기 때문이다.
+    """
     sentences = re.split(r"(?<=[.!?])\s+", summary.strip())
     sentences = [s for s in sentences if s]
     if not sentences:
         return "", "", "", ""
 
     problem = sentences[0]
-    result = sentences[-1] if len(sentences) > 1 else ""
-    method_sentences = sentences[1:-1] if len(sentences) > 2 else []
-    method = " ".join(method_sentences)
+    remaining = sentences[1:]
+    method = next((sentence for sentence in remaining if any(sig in sentence.lower() for sig in METHOD_SIGNALS)), "")
+    result = next((sentence for sentence in remaining if any(sig in sentence.lower() for sig in RESULT_SIGNALS)), "")
 
     # 문제의식(첫 문장)과 안 겹치게, 그 뒤 문장에서만 한계 신호어를 찾는다.
     # 방법 문장이 있으면 거기서 우선 찾고, 없으면 첫 문장 이후 전체에서 찾는다.
-    search_pool = method_sentences if method_sentences else sentences[1:]
+    search_pool = remaining
     limitation = ""
     for s in search_pool:
         if any(sig in s.lower() for sig in LIMITATION_SIGNALS):
@@ -105,3 +119,14 @@ def split_sections(summary):
             break
 
     return problem, method, result, limitation
+
+
+def _atom_datetime(value):
+    if not value:
+        return None
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None

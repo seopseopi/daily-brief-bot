@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
+  <title id="title">아침 브리핑 — 아침은 가볍게, 오늘은 선명하게.</title>
+  <desc id="desc">따뜻한 크림색 배경에 떠오르는 해, 하루의 일정과 체크리스트를 겹친 일러스트. 실제 Discord 화면이 아닌 브랜드 이미지입니다.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FCF8EF"/><stop offset="1" stop-color="#F3E8D8"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#EFC280"/><stop offset="1" stop-color="#F6DEC0"/>
+    </linearGradient>
+    <clipPath id="window"><rect x="820" y="57" width="324" height="330" rx="154"/></clipPath>
+  </defs>
+  <rect width="1280" height="480" rx="24" fill="url(#paper)"/>
+  <path d="M0 444H1280" stroke="#DFD2BE"/>
+  <g font-family="'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif">
+    <rect x="66" y="53" width="34" height="34" rx="10" fill="#22464B"/>
+    <path d="M73 73H93M76 69A7 7 0 0 1 90 69M83 60V57M72 63L70 61M94 63L96 61" fill="none" stroke="#F7D28C" stroke-width="2" stroke-linecap="round"/>
+    <text x="115" y="76" font-size="15" font-weight="700" fill="#22464B" letter-spacing="2.5">MORNING BRIEF</text>
+    <text x="66" y="174" font-size="56" font-weight="800" fill="#22464B" letter-spacing="-2">아침은 가볍게,</text>
+    <text x="66" y="246" font-size="56" font-weight="800" fill="#22464B" letter-spacing="-2">오늘은 선명하게.</text>
+    <text x="69" y="298" font-size="21" fill="#596C69">오늘 챙길 일부터 세상 소식까지, Discord로.</text>
+    <g font-size="15" font-weight="600">
+      <rect x="68" y="346" width="115" height="38" rx="19" fill="#E6EADD"/>
+      <text x="125" y="370" text-anchor="middle" fill="#345950">오늘 할 일</text>
+      <rect x="193" y="346" width="125" height="38" rx="19" fill="#F3DFC5"/>
+      <text x="255" y="370" text-anchor="middle" fill="#986444">날씨와 일정</text>
+      <rect x="328" y="346" width="112" height="38" rx="19" fill="#E6EADD"/>
+      <text x="384" y="370" text-anchor="middle" fill="#345950">관심 소식</text>
+    </g>
+    <text x="69" y="466" font-size="10" fill="#647670" letter-spacing="2">A LITTLE CLARITY, EVERY MORNING.</text>
+  </g>
+  <g clip-path="url(#window)">
+    <rect x="820" y="57" width="324" height="330" fill="url(#sky)"/>
+    <circle cx="990" cy="196" r="73" fill="#FDF7D7"/>
+    <path d="M790 288Q900 198 980 276T1180 260V420H790" fill="#B8C3A1"/>
+    <path d="M790 314Q890 265 981 305T1180 283V420H790" fill="#7D9B8B"/>
+    <path d="M790 348Q920 290 1060 343T1180 318V420H790" fill="#426F67"/>
+    <path d="M981 58V389" stroke="#F5EBDA" stroke-width="7"/>
+  </g>
+  <rect x="820" y="57" width="324" height="330" rx="154" fill="none" stroke="#DED0BA" stroke-width="3"/>
+  <ellipse cx="961" cy="418" rx="224" ry="13" fill="#D7C6AE" opacity=".45"/>
+  <g transform="translate(750 214) rotate(-7 100 95)">
+    <rect y="9" width="210" height="198" rx="18" fill="#C6B8A1" opacity=".35"/>
+    <rect width="210" height="198" rx="18" fill="#FFFDF7"/>
+    <path d="M0 18Q0 0 18 0H192Q210 0 210 18V48H0" fill="#C1744F"/>
+    <path d="M50 -8V15M160 -8V15" stroke="#22464B" stroke-width="8" stroke-linecap="round"/>
+    <g font-family="sans-serif" fill="#22464B">
+      <text x="22" y="88" font-size="11" letter-spacing="2">TODAY</text>
+      <text x="21" y="146" font-size="52" font-weight="700" letter-spacing="-2">07:30</text>
+    </g>
+    <path d="M25 172H82" stroke="#DFC08C" stroke-width="6" stroke-linecap="round"/>
+    <path d="M101 172H181" stroke="#E9EADF" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <g transform="translate(1005 249) rotate(7 90 80)">
+    <rect y="8" width="188" height="148" rx="16" fill="#C6B8A1" opacity=".28"/>
+    <rect width="188" height="148" rx="16" fill="#22464B"/>
+    <g fill="none" stroke="#F3CB88" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 34L28 39L37 28M23 69L28 74L37 63"/>
+      <rect x="24" y="99" width="12" height="12" rx="3" stroke="#91A69D"/>
+    </g>
+    <g stroke-linecap="round" stroke-width="6">
+      <path d="M54 33H151M54 69H129" stroke="#E8EAD9"/>
+      <path d="M54 105H143" stroke="#91A69D"/>
+    </g>
+  </g>
+  <g fill="none" stroke="#BC9467" stroke-width="2" stroke-linecap="round">
+    <path d="M761 113V129M753 121H769M1192 182V194M1186 188H1198"/>
+  </g>
+</svg>

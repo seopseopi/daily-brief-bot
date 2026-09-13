@@ -1,44 +1,96 @@
-"""매주 반복되는 고정 시간표 (수업 + 알바).
+"""Optional private weekly timetable loaded from the environment.
 
-시간이 바뀌면 이 파일만 고치면 된다. get_schedule()이 오늘 요일에
-해당하는 항목만 골라 브리핑에 넣는다.
+Set ``FIXED_TIMETABLE_JSON`` to an object whose keys are weekdays (``0`` is
+Monday, ``6`` is Sunday) and whose values are event arrays:
 
-형식: 요일번호(0=월 ... 6=일) -> [(시작 "HH:MM", 종료 "HH:MM", 이름, 비고), ...]
-같은 요일 안에서는 시간 순서로 적어야 빈 시간 계산이 맞다.
+``{"0": [["09:00", "10:30", "event name", "optional note"]]}``
+
+No personal schedule is kept in the public source tree. Invalid input fails
+closed to an empty timetable and its contents are never logged.
 """
 
-FIXED_TIMETABLE = {
-    0: [  # 월 — 1교시=90분 단위
-        ("13:00", "14:30", "모바일프로그래밍", "이창우 · 미래관2층31호"),
-        ("14:30", "16:00", "데이터과학", "박하명 · 미래관2층32호실"),
-    ],
-    1: [  # 화 — 점심시간 따로 안 뺌, 교시 그대로 이어붙임
-        ("09:00", "10:30", "한문과문화", "이명아 · 북악관6층10호실"),
-        ("10:30", "12:00", "알고리즘", "최준수 · 미래관2층32호실"),
-        ("12:00", "13:30", "컴퓨터구조", "임은진 · 미래관6층11호실"),
-        ("15:00", "22:30", "알바", ""),
-    ],
-    2: [  # 수
-        ("10:00", "11:00", "헬퍼", "공학관 지하1층 21호실"),
-        ("11:00", "12:00", "헬퍼", "북악관 5층11호실"),
-        ("13:00", "14:30", "모바일프로그래밍", "이창우 · 미래관2층31호"),
-        ("14:30", "16:00", "데이터과학", "박하명 · 미래관2층32호실"),
-    ],
-    3: [  # 목
-        ("09:00", "10:30", "한문과문화", "이명아 · 북악관6층10호실"),
-        ("10:30", "12:00", "알고리즘", "최준수 · 미래관2층32호실"),
-        ("12:00", "13:30", "컴퓨터구조", "임은진 · 미래관6층11호실"),
-        ("15:00", "22:30", "알바", ""),
-    ],
-    4: [  # 금 — 3시간 강의 2개(각각 교시 2개씩 연강)
-        ("09:00", "12:00", "실전프로젝트Ⅱ", "황석진 · 미래관4층24호실"),
-        ("12:00", "13:00", "헬퍼", "공학관 지하1층 21호실"),
-        ("13:00", "16:00", "이산수학", "이다원 · 미래관2층31호실"),
-    ],
-    5: [],  # 토
-    6: [],  # 일
-}
+from __future__ import annotations
 
-# 빈 시간을 계산할 하루 범위
+import json
+import re
+
+import settings
+
 DAY_START = "09:00"
 DAY_END = "23:00"
+
+_TIME_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+_MAX_CONFIG_CHARS = 100_000
+_MAX_EVENTS_PER_DAY = 50
+_MAX_NAME_CHARS = 200
+_MAX_NOTE_CHARS = 500
+
+
+def _minutes(value: str) -> int:
+    hours, minutes = (int(part) for part in value.split(":"))
+    return hours * 60 + minutes
+
+
+def parse_fixed_timetable(raw: str) -> dict[int, list[tuple[str, str, str, str]]]:
+    """Validate private timetable JSON.
+
+    An unset/blank value is the only normal empty timetable. Malformed input
+    raises a generic ``ValueError`` so the schedule section cannot present an
+    incomplete configuration as fresh. Error text never contains user data.
+    """
+    if isinstance(raw, str) and not raw.strip():
+        return {}
+    if not isinstance(raw, str) or len(raw) > _MAX_CONFIG_CHARS:
+        raise ValueError("FIXED_TIMETABLE_JSON has an invalid size or type")
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        raise ValueError("FIXED_TIMETABLE_JSON is not valid JSON") from None
+    if not isinstance(value, dict):
+        raise ValueError("FIXED_TIMETABLE_JSON schema is invalid")
+
+    parsed: dict[int, list[tuple[str, str, str, str]]] = {}
+    try:
+        for raw_day, raw_events in value.items():
+            if not isinstance(raw_day, str) or not raw_day.isdigit():
+                raise ValueError("weekday keys must be numeric strings")
+            day = int(raw_day)
+            if day not in range(7) or not isinstance(raw_events, list):
+                raise ValueError("weekday/event-list shape is invalid")
+            if len(raw_events) > _MAX_EVENTS_PER_DAY:
+                raise ValueError("too many events")
+
+            events = []
+            for raw_event in raw_events:
+                if not isinstance(raw_event, list) or len(raw_event) not in {3, 4}:
+                    raise ValueError("event must contain start, end, name, optional note")
+                if not all(isinstance(part, str) for part in raw_event):
+                    raise ValueError("event fields must be strings")
+                start, end, name = (part.strip() for part in raw_event[:3])
+                note = raw_event[3].strip() if len(raw_event) == 4 else ""
+                if not _TIME_PATTERN.fullmatch(start) or not _TIME_PATTERN.fullmatch(end):
+                    raise ValueError("invalid time")
+                if _minutes(end) <= _minutes(start):
+                    raise ValueError("event end must follow start")
+                if not name or len(name) > _MAX_NAME_CHARS or len(note) > _MAX_NOTE_CHARS:
+                    raise ValueError("invalid event text")
+                events.append((start, end, name, note))
+
+            events.sort(key=lambda event: (_minutes(event[0]), _minutes(event[1]), event[2]))
+            for previous, current in zip(events, events[1:]):
+                if _minutes(current[0]) < _minutes(previous[1]):
+                    raise ValueError("overlapping fixed events")
+            parsed[day] = events
+    except (TypeError, ValueError):
+        raise ValueError("FIXED_TIMETABLE_JSON schema is invalid") from None
+    return parsed
+
+
+FIXED_TIMETABLE_ERROR = None
+try:
+    FIXED_TIMETABLE = parse_fixed_timetable(settings.FIXED_TIMETABLE_JSON)
+except ValueError:
+    # Keep imports safe, but make the configuration failure explicit to
+    # schedule.get_schedule(). Never retain or log the invalid content here.
+    FIXED_TIMETABLE = {}
+    FIXED_TIMETABLE_ERROR = "invalid"

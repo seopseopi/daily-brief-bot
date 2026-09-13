@@ -1,0 +1,23 @@
+name: 개선 제안
+description: 매일 아침 더 유용하게 쓸 수 있는 기능이나 읽기 흐름을 제안해주세요.
+title: "[개선] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 어떤 상황에서 필요한가요?
+      description: 실제 사용 중 불편했던 점이나 놓치기 쉬운 일을 적어주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 기대하는 동작
+      description: 브리핑에서 무엇을 확인하거나 어떻게 행동할 수 있으면 좋을지 적어주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: 표시 예시 또는 참고 자료
+      description: 새 데이터 소스라면 공개 문서나 원문 링크를 함께 남겨주세요. 개인 데이터는 가상 예시로 바꿉니다.

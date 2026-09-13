@@ -3,6 +3,7 @@
 import json
 import os
 
+import settings
 from sources import _notices
 from sources._shared import fail
 
@@ -11,6 +12,7 @@ NOTICE_SITES = [
     ("cs", "컴공 학사공지", _notices.fetch_cs_notices),
     ("sw", "SW중심대 공지", _notices.fetch_sw_notices),
 ]
+_pending_state = None
 
 
 def _load_seen():
@@ -22,9 +24,27 @@ def _load_seen():
 
 
 def _save_seen(state):
-    os.makedirs(os.path.dirname(SEEN_NOTICES_PATH), exist_ok=True)
-    with open(SEEN_NOTICES_PATH, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(SEEN_NOTICES_PATH) or ".", exist_ok=True)
+    temporary = SEEN_NOTICES_PATH + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(temporary, SEEN_NOTICES_PATH)
+
+
+def discard_pending():
+    global _pending_state
+    _pending_state = None
+
+
+def commit_pending():
+    """Acknowledge notices only after every Discord batch was delivered."""
+    global _pending_state
+    if _pending_state is None:
+        return
+    if not settings.env_bool("BRIEF_READ_ONLY") and not settings.env_bool("DISCORD_DRY_RUN"):
+        _save_seen(_pending_state)
+    _pending_state = None
 
 
 def get_notices():
@@ -36,6 +56,8 @@ def get_notices():
     사이트를 처음 추가한 시점(state에 그 키가 아예 없음)에는 기존 글을
     전부 새 글로 쏟아내지 않도록, 그 회차엔 목록만 저장하고 넘어간다.
     """
+    global _pending_state
+    _pending_state = None
     state = _load_seen()
     new_state = {}
     new_by_site = []
@@ -43,8 +65,13 @@ def get_notices():
     for key, label, fetch_fn in NOTICE_SITES:
         try:
             current = fetch_fn()
+            # A successful HTTP 200 with zero parsed rows usually means the
+            # undocumented page structure changed. Never erase seen state in
+            # that case or silently report "no new notices".
+            if not current:
+                raise ValueError("notice parser returned no rows")
         except Exception as e:
-            print(f"[경고] {label} 조회 실패: {type(e).__name__}: {e}")
+            print(f"[경고] {label} 조회 실패: {type(e).__name__}")
             fail(label)
             new_state[key] = state.get(key, [])
             continue
@@ -58,5 +85,5 @@ def get_notices():
 
         new_state[key] = [post_id for post_id, _title, _url in current[:60]]
 
-    _save_seen(new_state)
+    _pending_state = new_state
     return new_by_site

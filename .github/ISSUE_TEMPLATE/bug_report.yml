@@ -1,0 +1,46 @@
+name: 오류 제보
+description: 브리핑 내용, 일정·마감, 조회 또는 전송 오류를 알려주세요.
+title: "[오류] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        재현에 필요한 최소 정보만 남겨주세요. 웹후크, API 키, 봇 토큰, 비공개 캘린더 주소와 개인 일정·과제 내용은 제거합니다.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 기대한 동작과 실제 결과
+      description: 잘못 표시된 부분과 기대한 결과를 적어주세요.
+      placeholder: "예: 캘린더 조회가 실패했는데 일정이 없는 것으로 표시됩니다."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 관련 영역
+      options:
+        - 일정·플래너·과제
+        - 날씨·대기질
+        - 뉴스·공지·시장·스포츠·공부·커뮤니티
+        - Discord 전송·예약 실행
+        - 로컬 실행·설정·문서
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 방법과 실행 환경
+      description: 실행 명령, Python 버전, 운영체제 또는 Actions 실행 시각(KST)을 알려주세요.
+      placeholder: |
+        실행 방법:
+        발생 시각:
+        Python / 운영체제:
+        재현 순서:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 비밀값을 제거한 로그 또는 예시
+      description: 공개해도 되는 가상 일정·마감으로 재현하면 원인 확인에 도움이 됩니다.
+      render: text

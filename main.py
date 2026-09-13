@@ -1,166 +1,77 @@
-"""아침 비서 - 매일 07:30 디스코드 브리핑 전송."""
+"""Daily brief entry point; rendering and source collection live in briefing/."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+import json
+import os
 
 import discord_sender as ds
-from sources import assignments, community, highlights, market, news, notices, schedule, sports, study
-from sources._shared import get_failures
+import settings
+from sources._shared import KST, get_failures
+from sources import notices
+from briefing.pipeline import collect_data, LOADERS
+from briefing.rendering import (
+    build_header, build_weather, build_schedule, build_notices, build_market,
+    build_news, build_sports, build_study, build_community, render_sections,
+    _deterministic_highlights,
+)
 
-KST = timezone(timedelta(hours=9))
-WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
-DDAY_EMOJI = {0: "🔴", 1: "🔴", 2: "🟡", 3: "🟡", 4: "🟡"}
+DELIVERY_STATE_PATH = "data/delivery_state.json"
 
 
-def dday_mark(days):
-    return DDAY_EMOJI.get(days, "🟢")
-
-
-def build_header(now, context_text):
-    date_str = f"{now.month}월 {now.day}일 {WEEKDAYS[now.weekday()]}요일"
-    lines = []
-    for i, (title, detail) in enumerate(highlights.get_highlights(context_text), 1):
-        num = ["1️⃣", "2️⃣", "3️⃣"][i - 1]
-        lines.append(f"{num} **{title}**\n> {detail}")
-
-    # 다른 섹션 + 방금 하이라이트 호출까지 쌓인 실패를 한 줄로 보여준다.
-    # get_highlights()가 끝난 뒤에 모아야 그 실패도 포함된다.
+def build_brief(now: datetime | None = None) -> list[dict]:
+    now = (now or datetime.now(KST)).astimezone(KST)
+    get_failures()  # Every build owns its own failure report.
+    data = collect_data(now)
+    embeds = render_sections(now, data)
+    if "notices" in data.get("_render_failed", []):
+        notices.discard_pending()
+    data["_reading_minutes"] = max(1, (sum(len(embed.get("description", "")) for embed in embeds) + 499) // 500)
+    data["_section_count"] = len(embeds)
     failures = get_failures()
-    if failures:
-        lines.append(f"-# ⚠️ 오늘 실패: {', '.join(failures)}")
-
-    return ds.make_embed(f"📰 {date_str}", "\n\n".join(lines), "header")
+    return [build_header(now, data, failures)] + embeds
 
 
-def build_schedule():
-    """오늘 수업도 없고 마감 과제도 없으면(흔한 주말 케이스) 임베드 자체를 생략한다."""
-    sc = schedule.get_schedule()
-    todos = assignments.get_assignments()
-    if not sc["events"] and not todos:
-        return None
-
-    parts = []
-    for time_str, name, note in sc["events"]:
-        block = f"**{time_str}**  {name}"
-        if note:
-            block += f"\n> {note}"
-        parts.append(block)
-    if sc["events"]:
-        parts.append(f"🕐 **빈 시간**  {sc['free_slots']}")
-    parts.append("\n**📝 과제**")
-    if not todos:
-        parts.append("_없음_")
-    for days, name, note in todos:
-        line = f"{dday_mark(days)} **D-{days}**  {name}"
-        if note:
-            line += f"\n> {note}"
-        parts.append(line)
-    return ds.make_embed("📅 일정 · 과제", "\n\n".join(parts), "schedule")
+def _scheduled_delivery_done(now: datetime) -> bool:
+    if os.environ.get("GITHUB_EVENT_NAME") != "schedule":
+        return False
+    try:
+        with open(DELIVERY_STATE_PATH, encoding="utf-8") as state_file:
+            state = json.load(state_file)
+        return isinstance(state, dict) and state.get("last_successful_date") == now.date().isoformat()
+    except (OSError, ValueError, TypeError):
+        return False
 
 
-def build_notices():
-    """새 공지가 없는 날(대부분)은 "새 공지 없음" 임베드를 굳이 보내지 않는다."""
-    items = notices.get_notices()
-    if not items:
-        return None
-    parts = []
-    for label, posts in items:
-        for title, url in posts:
-            parts.append(f"**{label}**\n{title}\n-# [더보기]({url})")
-    return ds.make_embed("🎓 학사 공지", "\n\n".join(parts), "notice")
+def _mark_scheduled_delivery(now: datetime) -> None:
+    if (os.environ.get("GITHUB_EVENT_NAME") != "schedule"
+            or settings.env_bool("DISCORD_DRY_RUN") or settings.env_bool("BRIEF_READ_ONLY")):
+        return
+    state = {
+        "last_successful_date": now.date().isoformat(),
+        "sent_at": now.isoformat(),
+    }
+    os.makedirs(os.path.dirname(DELIVERY_STATE_PATH), exist_ok=True)
+    temp_path = DELIVERY_STATE_PATH + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as state_file:
+        json.dump(state, state_file, ensure_ascii=False, indent=2)
+        state_file.write("\n")
+    os.replace(temp_path, DELIVERY_STATE_PATH)
 
 
-def _stock_lines(items):
-    out = []
-    for name, price, note in items:
-        out.append(f"**{name}** {price}\n> {note}")
-    return "\n".join(out)
-
-
-def build_market():
-    m = market.get_market()
-    p = []
-    p.append(f"**🇰🇷 {m['kr_index']}**\n> {m['kr_note']}")
-    p.append(f"__보유__\n{_stock_lines(m['kr_holdings'])}")
-    p.append(f"__화제 종목__\n{_stock_lines(m['kr_hot'])}")
-    p.append(f"**🇺🇸 {m['us_index']}**\n> {m['us_note']}")
-    p.append(f"__보유__\n{_stock_lines(m['us_holdings'])}")
-    p.append(f"__화제 종목__\n{_stock_lines(m['us_hot'])}")
-    p.append(f"💱 {m['fx']}")
-    ok, kn = m["outlook_kr"]
-    ou, un = m["outlook_us"]
-    p.append(
-        f"📗 **국장** {ok}\n> {kn}\n"
-        f"📙 **미장** {ou}\n> {un}\n"
-        f"-# 컨센서스·야간선물 취합 참고자료 · 투자 조언 아님"
-    )
-    return ds.make_embed("📈 마켓", "\n\n".join(p), "market")
-
-
-def build_news():
-    lines = []
-    for tag, title, detail, url, source_note in news.get_news():
-        block = f"**{tag}** {title}\n> {detail}"
-        if source_note:
-            block += f"\n-# {source_note}"
-        if url:
-            block += f"\n-# [더보기]({url})"
-        lines.append(block)
-    return ds.make_embed("🗞️ 뉴스", "\n\n".join(lines), "news")
-
-
-def build_sports():
-    s = sports.get_sports()
-    head, detail, standing, next_game = s["doosan"]
-    body = f"**{head}**\n> {detail}\n> {standing}\n> {next_game}\n\n**⚽ 해외축구**\n> {s['football']}"
-    return ds.make_embed("⚾ 스포츠", body, "sports")
-
-
-def build_study():
-    st = study.get_study()
-    p = [f"**📄 오늘의 논문**\n[{st['paper_title']}]({st['paper_url']})\n-# {st['paper_meta']}"]
-    for label, text in st["paper_sections"]:
-        p.append(f"**{label}**\n> {text}")
-    cname, cdesc = st["concept"]
-    p.append(f"**💡 개념 한 입 — {cname}**\n> {cdesc}")
-    term_lines = [f"`{t}`\n> {d}" for t, d in st["terms"]]
-    p.append("**🔤 오늘의 용어**\n" + "\n".join(term_lines))
-    return ds.make_embed("📚 공부 피드", "\n\n".join(p), "study")
-
-
-def build_community():
-    lines = []
-    for source, stat, title, detail, url in community.get_community():
-        block = f"**{source}** -# {stat}\n{title}\n> {detail}"
-        if url:
-            block += f"\n-# [더보기]({url})"
-        lines.append(block)
-    body = "\n\n".join(lines) + "\n\n-# 비공식 정보 · 논쟁 톤 제외하고 사실만 추출"
-    return ds.make_embed("🔥 커뮤니티 펄스", body, "community")
-
-
-def main():
+def main() -> None:
     now = datetime.now(KST)
-
-    # 헤더의 "오늘의 세 줄"은 다른 섹션 실제 내용을 LLM에 넘겨 요약하므로,
-    # 나머지 섹션을 먼저 만들고 헤더를 맨 마지막에 조립한다.
-    # 일정/학사공지는 내용이 정말 없으면 None을 돌려줘 임베드째로 뺀다.
-    other_embeds = [
-        e for e in [
-            build_schedule(),
-            build_notices(),
-            build_market(),
-            build_news(),
-            build_sports(),
-            build_study(),
-            build_community(),
-        ]
-        if e is not None
-    ]
-    context_text = "\n\n".join(f"[{e['title']}]\n{e['description']}" for e in other_embeds)
-    header_embed = build_header(now, context_text)
-
-    ds.send([header_embed] + other_embeds)
+    if _scheduled_delivery_done(now):
+        print(f"{now.date().isoformat()} 브리핑은 이미 전송되어 중복 실행을 건너뜁니다.")
+        return
+    notices.discard_pending()
+    try:
+        ds.send(build_brief(now))
+        notices.commit_pending()
+    finally:
+        notices.discard_pending()
+    _mark_scheduled_delivery(now)
 
 
 if __name__ == "__main__":
-    main()
+    from briefing.cli import run
+    raise SystemExit(run())

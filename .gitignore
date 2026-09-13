@@ -1,6 +1,8 @@
 # 비밀값은 절대 커밋하지 않는다 (GitHub Secrets 사용)
 .env
 *.env
+.private/
+data/discord_assignments.json
 
 # Python
 __pycache__/
@@ -10,3 +12,7 @@ venv/
 
 # OS
 .DS_Store
+
+# Local preview verification
+output/playwright/
+.playwright-cli/

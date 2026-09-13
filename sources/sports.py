@@ -46,7 +46,7 @@ def _kbo():
     today = datetime.now(KST).date()
     url = (
         f"{NAVER_SPORTS_GAMES}?fields=basic,score&size=50"
-        f"&fromDate={today - timedelta(days=4)}&toDate={today + timedelta(days=1)}"
+        f"&fromDate={today - timedelta(days=4)}&toDate={today + timedelta(days=7)}"
         "&upperCategoryId=kbaseball&categoryId=kbo"
     )
     games = _market.fetch_json(url)["result"]["games"]
@@ -75,7 +75,7 @@ def _kbo():
     try:
         standing = _kbo_standings()
     except Exception as e:
-        print(f"[경고] KBO 순위 조회 실패: {type(e).__name__}: {e}")
+        print(f"[경고] KBO 순위 조회 실패: {type(e).__name__}")
         fail("두산 순위")
         standing = "(순위 조회 실패)"
 
