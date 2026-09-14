@@ -107,8 +107,13 @@ MARKET_HOLDINGS_US=AAPL;MSFT
 
 ```bash
 python main.py --doctor
+python main.py --check-connections --sections weather,schedule,news --format json
 python main.py --preview --sections weather,schedule,news --compact
 python main.py --demo --format markdown --output /tmp/morning-brief-demo.md
 ```
 
 `--doctor`는 설정의 존재·형식을 로컬에서 점검합니다. API 키 유효성, 캘린더 접근 권한 또는 Discord 도착 여부를 확인하는 네트워크 연결 검사는 아닙니다. `--preview`는 설정한 외부 데이터·AI API를 호출할 수 있으나 Discord 전송과 상태 파일 저장은 생략합니다.
+
+실제 데이터 소스 연결은 `--check-connections`로 점검합니다. 수집 내용 없이 소스별 상태만 출력하며, 미설정·부분 실패·전체 실패가 있으면 종료 코드 `1`을 반환합니다. Discord 전송과 상태 저장은 하지 않습니다.
+
+GitHub Actions Secrets는 로컬 셸로 자동 전달되지 않습니다. **운영 Secret이 적용된 연결**은 [수동 연결 검사](operations.md#실제-연결-점검) 워크플로로 확인하고, 로컬 실행에는 같은 이름의 환경 변수를 별도로 설정합니다.

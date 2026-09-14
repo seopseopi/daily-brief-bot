@@ -32,6 +32,8 @@ Discord 메시지는 embed 개수와 글자 수 제한에 맞춰 나눕니다. H
 
 ## 증상별 확인
 
+연결이 의심되면 먼저 아래의 [실제 연결 점검](#실제-연결-점검)으로 실패한 소스를 확인합니다.
+
 | 증상 | 확인할 항목 |
 | :--- | :--- |
 | 브리핑이 도착하지 않음 | Actions 실행 시작 여부 → 테스트 결과 → 웹후크 설정 → 전송 단계 로그 |
@@ -41,10 +43,23 @@ Discord 메시지는 embed 개수와 글자 수 제한에 맞춰 나눕니다. H
 | 등록한 과제가 보이지 않음 | 봇의 채널 읽기 권한·채널 ID·명령 날짜 형식·이력 조회 한도 |
 | 자연어 과제 해석 실패 | API 키·API 이용 상태. 명시적 `추가`/`완료` 명령 사용 가능 |
 | 뉴스·스포츠·시장 일부 실패 | 원본 서비스 응답·데이터 최신성·HTML/API 구조 변화 |
-| macOS에서 `SSLCertVerificationError` | 사용 중인 Python의 CA 인증서 설치 상태 또는 `SSL_CERT_FILE`에 지정한 신뢰할 수 있는 인증서 묶음 확인. 인증서 검증은 끄지 않음 |
+| macOS 등에서 `SSLCertVerificationError` | 기본 CA 저장소가 비어 있으면 사용 가능한 OS 인증서 묶음을 자동으로 사용. 계속 실패하면 Python CA 설치 상태 또는 `SSL_CERT_FILE`의 신뢰할 수 있는 인증서 묶음 확인. TLS 검증은 유지 |
 | 전송은 됐는데 workflow 실패 | 상태 저장 단계의 Git push 실패 여부. 수동 재실행 시 중복 가능 |
 
 이슈를 만들 때는 실행 시각·증상·실패한 섹션과 비밀값을 제거한 로그를 첨부합니다. 웹후크·토큰·비공개 캘린더 URL·실제 과제 내용은 첨부하지 않습니다.
+
+## 실제 연결 점검
+
+```bash
+python main.py --check-connections
+python main.py --check-connections --sections weather,schedule,news --format json
+```
+
+`--doctor`는 설정값의 존재·형식을 확인합니다. `--check-connections`는 선택한 데이터 소스를 실제로 조회하고 **수집 내용 없이 상태만** 출력합니다. `text`와 `json` 형식을 지원하며, 미설정·부분 실패·전체 실패가 있으면 종료 코드 `1`을 반환합니다.
+
+이 검사는 Discord로 메시지를 보내거나 상태 파일을 저장하지 않습니다. 선택한 소스에 필요한 외부 API와 AI API는 호출할 수 있습니다. 데이터 수집 상태를 확인하는 검사이므로 웹후크 전송 성공이나 실제 메시지 도착을 확인한 것으로 해석하지 않습니다.
+
+GitHub Actions의 운영 설정으로 확인하려면 [`connections.yml`](../.github/workflows/connections.yml)을 선택해 `Run workflow`로 수동 실행합니다. 저장소의 Secrets·Variables를 적용해 연결을 검사하며 브리핑은 발송하지 않습니다. GitHub Secret을 설정해도 로컬 환경 변수에는 자동으로 반영되지 않습니다.
 
 ## 개발 검증
 

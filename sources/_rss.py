@@ -10,6 +10,8 @@ import re
 import time
 import urllib.error
 import urllib.request
+
+from http_client import open_url
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -30,7 +32,7 @@ def fetch_rss(url):
     last_error = None
     for attempt in range(ATTEMPTS):
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+            with open_url(req, timeout=TIMEOUT) as res:
                 raw = res.read()
             break
         except urllib.error.HTTPError as exc:

@@ -8,6 +8,8 @@ import json
 import urllib.parse
 import urllib.request
 
+from http_client import open_url
+
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
 API_BASE = "https://discord.com/api/v10"
 TIMEOUT = 15
@@ -34,7 +36,7 @@ def fetch_channel_messages(channel_id, bot_token, after_id=None, before_id=None,
         "Authorization": f"Bot {bot_token}",
         "User-Agent": USER_AGENT,
     })
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+    with open_url(req, timeout=TIMEOUT) as res:
         data = json.loads(res.read())
     if not isinstance(data, list):
         raise ValueError("Discord messages response is not a list")

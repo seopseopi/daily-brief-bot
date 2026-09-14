@@ -12,6 +12,8 @@ import time as time_module
 import urllib.error
 import urllib.request
 
+from http_client import open_url
+
 from sources._shared import KST
 
 USER_AGENT = "MorningBriefBot/2.0"
@@ -25,7 +27,7 @@ def fetch_ics(url: str) -> bytes:
     last_error = None
     for attempt in range(ATTEMPTS):
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as response:
+            with open_url(req, timeout=TIMEOUT) as response:
                 raw = response.read()
             break
         except urllib.error.HTTPError as exc:

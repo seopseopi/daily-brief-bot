@@ -61,6 +61,9 @@ python main.py --demo --format html --output /tmp/morning-brief-demo.html
 # 설정 존재 여부 점검 — 비밀값을 출력하거나 외부 연결을 요청하지 않음
 python main.py --doctor
 
+# 실제 데이터 소스 연결 점검 — 수집 내용 없이 상태만 출력
+python main.py --check-connections --sections weather,schedule,news
+
 # 연결한 실제 소스를 조회하되 Discord 전송·상태 저장 없이 미리보기
 python main.py --preview --sections weather,schedule,news --compact
 ```
@@ -76,6 +79,7 @@ python main.py --preview --sections weather,schedule,news --compact
 | `--sections weather,schedule,news` | 이번 실행에서 볼 섹션 선택 |
 | `--compact` | 핵심 내용을 중심으로 분량 줄이기 |
 | `--doctor` | 설정값의 존재 여부와 형식 확인 |
+| `--check-connections` | 실제 소스 수집 상태 확인. 전송·상태 저장 없이 `text` 또는 `json`으로 출력 |
 
 ### Discord로 받기
 

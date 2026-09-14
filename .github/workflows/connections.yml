@@ -1,0 +1,45 @@
+name: 연결 검사
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brief-connection-checks
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: 운영 설정으로 실제 소스 검사 (발송 없음)
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          ASSIGNMENT_CHANNEL_ID: ${{ secrets.ASSIGNMENT_CHANNEL_ID }}
+          CALENDAR_ICS_URLS: ${{ secrets.CALENDAR_ICS_URLS }}
+          FIXED_TIMETABLE_JSON: ${{ secrets.FIXED_TIMETABLE_JSON }}
+          MARKET_HOLDINGS_KR: ${{ secrets.MARKET_HOLDINGS_KR }}
+          MARKET_HOLDINGS_US: ${{ secrets.MARKET_HOLDINGS_US }}
+          BRIEF_LOCATION_NAME: ${{ secrets.BRIEF_LOCATION_NAME || vars.BRIEF_LOCATION_NAME }}
+          BRIEF_LATITUDE: ${{ secrets.BRIEF_LATITUDE || vars.BRIEF_LATITUDE }}
+          BRIEF_LONGITUDE: ${{ secrets.BRIEF_LONGITUDE || vars.BRIEF_LONGITUDE }}
+          BRIEF_SECTIONS: ${{ vars.BRIEF_SECTIONS }}
+          BRIEF_MODE: ${{ vars.BRIEF_MODE }}
+          INCLUDE_FIXED_TIMETABLE: ${{ vars.INCLUDE_FIXED_TIMETABLE }}
+          NEWS_MAX_AGE_HOURS: ${{ vars.NEWS_MAX_AGE_HOURS }}
+          COMMUNITY_MAX_AGE_HOURS: ${{ vars.COMMUNITY_MAX_AGE_HOURS }}
+          ASSIGNMENT_HISTORY_LIMIT: ${{ vars.ASSIGNMENT_HISTORY_LIMIT }}
+          USE_LLM_NEWS_SUMMARIES: ${{ vars.USE_LLM_NEWS_SUMMARIES }}
+          USE_LLM_COMMUNITY_SUMMARIES: ${{ vars.USE_LLM_COMMUNITY_SUMMARIES }}
+        run: python main.py --check-connections --format json

@@ -9,6 +9,8 @@ import time
 import urllib.error
 import urllib.request
 
+from http_client import open_url
+
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 
 # 디스코드(Cloudflare)가 urllib 기본 User-Agent를 봇으로 간주해 403으로
@@ -252,7 +254,7 @@ def _post_batch(webhook_url, embeds):
 
     for attempt in range(MAX_ATTEMPTS):
         try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as res:
+            with open_url(req, timeout=REQUEST_TIMEOUT) as res:
                 return res.status
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", errors="replace")

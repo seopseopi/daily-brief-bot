@@ -83,6 +83,7 @@ def get_study():
     LLM이 없거나 실패하면 초록을 문장 위치로 잘라 배치하는 근사치
     (_paper_sections_heuristic)로 조용히 폴백한다.
     """
+    source_failed = False
     try:
         papers = _arxiv.search(RESEARCH_KEYWORDS, ARXIV_CATEGORIES, max_results=10)
         now = datetime.now(KST)
@@ -95,6 +96,7 @@ def get_study():
     except Exception as e:
         print(f"[경고] arXiv 조회 실패: {type(e).__name__}")
         fail("arXiv 논문")
+        source_failed = True
         best, matched = None, []
 
     if best:
@@ -112,12 +114,13 @@ def get_study():
         author_note = f"{authors[0]} 외 {len(authors) - 1}명" if len(authors) > 1 else (authors[0] if authors else "")
         paper_title = best["title"]
         published = best.get("published_at")
-        date_note = f" · {published.astimezone(KST):%Y-%m-%d} 등록" if published else ""
+        date_label = "발표" if best.get("date_kind") == "announcement" else "등록"
+        date_note = f" · {published.astimezone(KST):%Y-%m-%d} {date_label}" if published else ""
         paper_meta = f"arXiv:{arxiv_id}{date_note}" + (f" · {author_note}" if author_note else "")
         paper_url = best["url"]
     else:
-        paper_title = "(arXiv 조회 실패)"
-        paper_meta = "잠시 후 다시 시도해주세요"
+        paper_title = "(arXiv 조회 실패)" if source_failed else "(최근 조건에 맞는 논문 없음)"
+        paper_meta = "잠시 후 다시 시도해주세요" if source_failed else "최근 7일 · 관심 키워드 기준으로 확인"
         paper_url = "https://arxiv.org"
         sections = []
         summary_kind = "unavailable"
@@ -125,6 +128,7 @@ def get_study():
     concept, terms = _glossary(best)
 
     return {
+        "status": "unavailable" if source_failed else "fresh" if best else "empty",
         "paper_title": paper_title,
         "paper_meta": paper_meta,
         "paper_url": paper_url,

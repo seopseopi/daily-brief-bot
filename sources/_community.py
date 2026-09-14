@@ -26,6 +26,8 @@ import html
 import json
 import re
 import urllib.request
+
+from http_client import open_url
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
@@ -45,7 +47,7 @@ BLOCKLIST = ("시발", "병신", "지랄", "새끼", "fuck", "nigger", "retard")
 
 def _get(url):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+    with open_url(req, timeout=TIMEOUT) as res:
         return res.read()
 
 

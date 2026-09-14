@@ -66,6 +66,35 @@ def doctor():
             "note": "설정 형식만 확인했습니다. 네트워크 요청·메시지 전송·상태 변경 없음."}
 
 
+def check_connections():
+    """Exercise the configured sources without exporting their personal content."""
+    from datetime import datetime
+    from briefing.pipeline import collect_data
+    from briefing.rendering import render_sections
+    from sources import notices
+    from sources._shared import KST, get_failures
+
+    now = datetime.now(KST)
+    get_failures()
+    notices.discard_pending()
+    try:
+        data = collect_data(now)
+        render_sections(now, data)
+        sources = []
+        for name, health in data.get("_source_health", {}).items():
+            health = dict(health)
+            if name in data.get("_render_failed", []):
+                health["status"] = "unavailable"
+            sources.append({"name": name, **health})
+        sources.sort(key=lambda source: source["name"])
+        failures = get_failures()
+        return {"ok": bool(sources) and not failures and all(source["status"] in {"ok", "fresh", "empty"} for source in sources),
+                "checked_at": now.isoformat(), "sources": sources, "failures": failures,
+                "note": "실제 소스 조회·표시 형식만 검사했습니다. Discord 메시지 전송·상태 저장 없음."}
+    finally:
+        notices.discard_pending()
+
+
 @contextmanager
 def _overrides(args):
     sections, mode = settings.ENABLED_SECTIONS, settings.BRIEF_MODE
@@ -79,7 +108,7 @@ def _overrides(args):
             settings.BRIEF_MODE = "compact"
         elif args.demo:
             settings.BRIEF_MODE = "full"
-        if args.preview or args.demo:
+        if args.preview or args.demo or args.check_connections:
             os.environ["BRIEF_READ_ONLY"] = "1"
             os.environ["DISCORD_DRY_RUN"] = "1"
         yield
@@ -98,6 +127,7 @@ def run(argv=None):
     action.add_argument("--preview", action="store_true", help="실제 소스를 조회하되 전송·상태 저장 없이 보기")
     action.add_argument("--demo", action="store_true", help="비밀키·네트워크 없이 가상 브리핑 보기")
     action.add_argument("--doctor", action="store_true", help="값을 노출하지 않고 설정 존재 여부·형식 확인")
+    action.add_argument("--check-connections", action="store_true", help="실제 소스 연결을 내용 노출·전송·상태 저장 없이 검사")
     parser.add_argument("--format", choices=("text", "markdown", "json", "html"), default="text", help="미리보기 출력 형식")
     parser.add_argument("--output", type=Path, help="미리보기 저장 경로 (개인 데이터는 .private/ 권장)")
     parser.add_argument("--sections", help="표시할 섹션: weather,schedule,news 등")
@@ -105,7 +135,9 @@ def run(argv=None):
     args = parser.parse_args(argv)
     if args.doctor and (args.output or args.format not in {"text", "json"}):
         parser.error("--doctor는 text/json 콘솔 출력만 지원합니다.")
-    if not (args.preview or args.demo or args.doctor) and (args.output or args.format != "text"):
+    if args.check_connections and (args.output or args.format not in {"text", "json"}):
+        parser.error("--check-connections는 text/json 콘솔 출력만 지원합니다.")
+    if not (args.preview or args.demo or args.doctor or args.check_connections) and (args.output or args.format != "text"):
         parser.error("--format/--output은 --preview 또는 --demo와 함께 사용하세요.")
 
     with _overrides(args):
@@ -119,6 +151,13 @@ def run(argv=None):
             errors.append("--sections에 유효한 섹션 이름을 지정하세요.")
         if errors:
             parser.error(" ".join(errors))
+        if args.check_connections:
+            with redirect_stdout(sys.stderr):
+                report = check_connections()
+            print(json.dumps(report, ensure_ascii=False, indent=2) if args.format == "json" else
+                  "\n".join(f"[{source['status']}] {source['name']} · {source['duration_ms']}ms"
+                            for source in report["sources"]) + "\n" + report["note"])
+            return 0 if report["ok"] else 1
         import main
         if not (args.preview or args.demo):
             main.main()

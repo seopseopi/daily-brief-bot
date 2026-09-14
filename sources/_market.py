@@ -16,6 +16,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from http_client import open_url
+
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
 TIMEOUT = 8
 
@@ -35,7 +37,7 @@ def _get(url):
         url,
         headers={"User-Agent": USER_AGENT, "Accept": "application/json,text/html,*/*"},
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+    with open_url(req, timeout=TIMEOUT) as res:
         return res.read()
 
 

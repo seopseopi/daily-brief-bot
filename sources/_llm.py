@@ -10,6 +10,8 @@ import json
 import os
 import urllib.request
 
+from http_client import open_url
+
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 API_URL = "https://api.anthropic.com/v1/messages"
 MODEL = "claude-haiku-4-5-20251001"  # 매일 짧은 요약 몇 번 — 가장 저렴한 모델로 충분
@@ -40,7 +42,7 @@ def _call(prompt, max_tokens=800):
             "anthropic-version": "2023-06-01",
         },
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+    with open_url(req, timeout=TIMEOUT) as res:
         data = json.loads(res.read())
 
     text = data["content"][0]["text"].strip()

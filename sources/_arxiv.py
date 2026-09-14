@@ -10,6 +10,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from http_client import open_url
 import xml.etree.ElementTree as ET
 
 USER_AGENT = "MorningBriefBot/1.0 (+https://github.com/seopseopi/daily-brief-bot)"
@@ -17,6 +19,9 @@ TIMEOUT = 25
 RETRIES = 2
 RETRY_BACKOFF = 3
 NS = {"a": "http://www.w3.org/2005/Atom"}
+RSS_NS = {**NS, "arxiv": "http://arxiv.org/schemas/atom", "dc": "http://purl.org/dc/elements/1.1/"}
+RSS_BASE = "https://rss.arxiv.org/atom/"
+RSS_TIMEOUT = 10
 
 LIMITATION_SIGNALS = (
     "however", "limitation", "limited", "future work",
@@ -34,7 +39,12 @@ METHOD_SIGNALS = (
 
 def search(keywords, categories, max_results=15):
     """제목/초록에 keywords 중 하나라도 걸리고, categories 중 하나에 속하는
-    최신 논문을 최대 max_results개 가져온다."""
+    최신 논문을 최대 max_results개 가져온다.
+
+    검색 API가 제한되거나 일시적으로 불통이면 공식 카테고리 Atom 피드의
+    신규 발표에서 같은 키워드를 찾는다. 갱신·교차 등록 논문을 새 논문으로
+    취급하거나 피드 생성 시각을 논문 발표 시각으로 대신하지 않는다.
+    """
     cat_clause = " OR ".join(f"cat:{c}" for c in categories)
     kw_clause = " OR ".join(f'abs:"{k}"' for k in keywords)
     query = f"({cat_clause}) AND ({kw_clause})"
@@ -49,31 +59,100 @@ def search(keywords, categories, max_results=15):
     )
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     raw = None
-    last_exc = None
     for attempt in range(RETRIES):
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+            with open_url(req, timeout=TIMEOUT) as res:
                 raw = res.read()
             break
-        except (urllib.error.URLError, TimeoutError) as e:
-            # 429(요청 과다)나 타임아웃은 대개 일시적 — 잠깐 쉬고 재시도.
-            last_exc = e
+        except urllib.error.HTTPError as exc:
+            # Do not immediately repeat a rate-limited query. The public daily
+            # category feed is a separate, documented source for new papers.
+            if exc.code == 429:
+                break
+            if exc.code not in {500, 502, 503, 504}:
+                raise
+            if attempt < RETRIES - 1:
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+        except (urllib.error.URLError, TimeoutError):
             if attempt < RETRIES - 1:
                 time.sleep(RETRY_BACKOFF * (attempt + 1))
     if raw is None:
-        raise last_exc
+        return _search_announcements(keywords, categories, max_results)
+    return _parse_feed(raw)
+
+
+def _parse_feed(raw, *, announcements=False):
     root = ET.fromstring(raw)
+    if root.tag != f"{{{NS['a']}}}feed":
+        raise ValueError("arXiv did not return an Atom feed")
     papers = []
+    seen = set()
     for entry in root.findall("a:entry", NS):
+        entry_id = entry.findtext("a:id", default="", namespaces=NS).strip()
+        if "/api/errors" in entry_id:
+            raise ValueError("arXiv returned an API error entry")
+        title = " ".join(entry.findtext("a:title", default="", namespaces=NS).split())
+        summary = " ".join(entry.findtext("a:summary", default="", namespaces=NS).split())
+        published = _atom_datetime(entry.findtext("a:published", default="", namespaces=NS))
+        if announcements:
+            if entry.findtext("arxiv:announce_type", default="", namespaces=RSS_NS).strip() != "new":
+                continue
+            # Atom announcements prefix the abstract with its ID and type.
+            # Keep only the abstract, never a fabricated substitute.
+            if "Abstract:" not in summary:
+                continue
+            summary = summary.split("Abstract:", 1)[1].strip()
+            links = entry.findall("a:link", NS)
+            url = next((link.get("href", "") for link in links if link.get("rel") == "alternate"), "")
+            creators = entry.findall("dc:creator", RSS_NS)
+            authors = [name.strip() for creator in creators for name in (creator.text or "").split(",") if name.strip()]
+            updated = None  # RSS updated is feed generation time, not a paper revision.
+        else:
+            url = entry_id
+            authors = [
+                name.strip() for author in entry.findall("a:author", NS)
+                if (name := author.findtext("a:name", default="", namespaces=NS)).strip()
+            ]
+            updated = _atom_datetime(entry.findtext("a:updated", default="", namespaces=NS))
+        parsed_url = urllib.parse.urlsplit(url)
+        if (
+            not title or not summary or published is None or published.tzinfo is None
+            or parsed_url.scheme not in {"http", "https"}
+            or parsed_url.hostname not in {"arxiv.org", "export.arxiv.org"}
+            or not parsed_url.path.startswith("/abs/")
+        ):
+            continue
+        url = url.replace("http://", "https://", 1)
+        if url in seen:
+            continue
+        seen.add(url)
         papers.append({
-            "title": " ".join(entry.find("a:title", NS).text.split()),
-            "summary": " ".join(entry.find("a:summary", NS).text.split()),
-            "url": entry.find("a:id", NS).text.strip().replace("http://", "https://", 1),
-            "authors": [a.find("a:name", NS).text for a in entry.findall("a:author", NS)],
-            "published_at": _atom_datetime(entry.findtext("a:published", default="", namespaces=NS)),
-            "updated_at": _atom_datetime(entry.findtext("a:updated", default="", namespaces=NS)),
+            "title": title,
+            "summary": summary,
+            "url": url,
+            "authors": authors,
+            "published_at": published,
+            "updated_at": updated,
+            "date_kind": "announcement" if announcements else "submitted",
         })
     return papers
+
+
+def _search_announcements(keywords, categories, max_results):
+    """One public feed request; filter locally before applying the result cap."""
+    if not categories:
+        return []
+    category_path = "+".join(urllib.parse.quote(category, safe=".") for category in dict.fromkeys(categories))
+    req = urllib.request.Request(RSS_BASE + category_path, headers={"User-Agent": USER_AGENT})
+    with open_url(req, timeout=RSS_TIMEOUT) as response:
+        papers = _parse_feed(response.read(), announcements=True)
+    matches = []
+    for paper in papers:
+        text = (paper["title"] + " " + paper["summary"]).lower().replace("-", " ")
+        if not keywords or any(keyword.lower().replace("-", " ") in text for keyword in keywords):
+            matches.append(paper)
+    matches.sort(key=lambda paper: paper["published_at"], reverse=True)
+    return matches[:max_results]
 
 
 def pick_best(papers, keywords):
