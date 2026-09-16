@@ -46,7 +46,7 @@
     <path d="M50 -8V15M160 -8V15" stroke="#22464B" stroke-width="8" stroke-linecap="round"/>
     <g font-family="sans-serif" fill="#22464B">
       <text x="22" y="88" font-size="11" letter-spacing="2">TODAY</text>
-      <text x="21" y="146" font-size="52" font-weight="700" letter-spacing="-2">07:30</text>
+      <text x="21" y="146" font-size="52" font-weight="700" letter-spacing="-2">08:00</text>
     </g>
     <path d="M25 172H82" stroke="#DFC08C" stroke-width="6" stroke-linecap="round"/>
     <path d="M101 172H181" stroke="#E9EADF" stroke-width="6" stroke-linecap="round"/>

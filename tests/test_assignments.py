@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest import mock
 
 from sources import assignments
@@ -15,6 +15,24 @@ class FixedDateTime(datetime):
 
 
 class AssignmentTests(unittest.TestCase):
+    def test_history_resolves_relative_deadlines_from_each_message_kst_date(self):
+        messages = [
+            {"id": "1", "content": "내일까지 첫 과제", "timestamp": "2026-09-08T16:00:00Z"},
+            {"id": "2", "content": "내일까지 둘째 과제", "timestamp": "2026-09-09T16:00:00Z"},
+            {"id": "3", "content": "완료 | 첫 과제", "timestamp": "2026-09-10T01:00:00Z"},
+        ]
+        def parse(contents, message_date):
+            deadline = (datetime.fromisoformat(message_date) + timedelta(days=1)).date().isoformat()
+            return [{"action": "add", "name": content.split("내일까지 ")[1],
+                     "deadline": deadline, "note": ""} for content in contents]
+        with (mock.patch.dict(os.environ, {"DISCORD_BOT_TOKEN": "token", "ASSIGNMENT_CHANNEL_ID": "123"}, clear=True),
+              mock.patch.object(assignments, "datetime", FixedDateTime),
+              mock.patch.object(assignments._discord, "fetch_channel_history", return_value=messages),
+              mock.patch.object(assignments._llm, "parse_assignments", side_effect=parse) as parser):
+            result = assignments._fetch_discord_assignments()
+        self.assertEqual([c.args[1] for c in parser.call_args_list], ["2026-09-09", "2026-09-10"])
+        self.assertEqual([(item["name"], item["deadline"]) for item in result], [("둘째 과제", "2026-09-11")])
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.state_path = os.path.join(self.temp_dir.name, "discord_assignments.json")

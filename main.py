@@ -1,8 +1,9 @@
 """Daily brief entry point; rendering and source collection live in briefing/."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
+import time
 
 import discord_sender as ds
 import settings
@@ -16,6 +17,22 @@ from briefing.rendering import (
 )
 
 DELIVERY_STATE_PATH = "data/delivery_state.json"
+
+
+def _wait_until(target: datetime) -> None:
+    """Recheck wall time in short intervals, including after a clock adjustment."""
+    while True:
+        remaining = (target - datetime.now(KST)).total_seconds()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 30))
+
+
+def _scheduled_target(now: datetime) -> datetime | None:
+    if (os.environ.get("GITHUB_EVENT_NAME") != "schedule"
+            or settings.env_bool("DISCORD_DRY_RUN") or settings.env_bool("BRIEF_READ_ONLY")):
+        return None
+    return now.astimezone(KST).replace(hour=8, minute=0, second=0, microsecond=0)
 
 
 def build_brief(now: datetime | None = None) -> list[dict]:
@@ -63,13 +80,23 @@ def main() -> None:
     if _scheduled_delivery_done(now):
         print(f"{now.date().isoformat()} 브리핑은 이미 전송되어 중복 실행을 건너뜁니다.")
         return
+    target = _scheduled_target(now)
+    if target:
+        # Start the runner early to absorb Actions cron delays, but collect
+        # fresh data only shortly before delivery. Late recovery runs send now.
+        print(f"[예약] {target:%Y-%m-%d %H:%M} KST 발송 · 07:57부터 수집", flush=True)
+        _wait_until(target - timedelta(minutes=3))
+        now = datetime.now(KST)
     notices.discard_pending()
     try:
-        ds.send(build_brief(now))
+        embeds = build_brief(now)
+        if target:
+            _wait_until(target)
+        ds.send(embeds)
         notices.commit_pending()
     finally:
         notices.discard_pending()
-    _mark_scheduled_delivery(now)
+    _mark_scheduled_delivery(datetime.now(KST))
 
 
 if __name__ == "__main__":

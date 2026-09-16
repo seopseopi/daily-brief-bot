@@ -22,6 +22,19 @@ class RenderingRegressionTests(unittest.TestCase):
     def tearDown(self):
         get_failures()
 
+    def test_empty_notices_stay_visible_and_distinguish_failed_lookup(self):
+        for status in ("ok", "partial"):
+            data = {"notices": [], "_source_health": {"notices": {"status": status}}}
+            with mock.patch.object(rendering.settings, "ENABLED_SECTIONS", {"notices"}):
+                embeds = rendering.render_sections(NOW, data)
+            self.assertEqual(len(embeds), 1)
+            body = embeds[0]["description"]
+            if status == "ok":
+                self.assertIn("새 공지가 없습니다", body)
+            else:
+                self.assertIn("누락될 수 있습니다", body)
+                self.assertNotIn("새 공지가 없습니다", body)
+
     def test_compact_bad_section_does_not_discard_healthy_sections(self):
         for value in (None, 42):
             with self.subTest(value=value):

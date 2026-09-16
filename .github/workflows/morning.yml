@@ -2,10 +2,13 @@ name: 아침 브리핑
 
 on:
   schedule:
-    # 07:30 KST와 10/20분 뒤 복구 기회를 함께 예약한다. 첫 성공만
-    # data/delivery_state.json에 기록하므로 후속 실행은 중복 전송하지 않는다.
-    # GitHub Actions cron 자체는 정시 실행 SLA가 없다는 점은 README 참고.
-    - cron: "30,40,50 22 * * *"
+    # 최근 약 2시간의 cron 지연을 흡수하도록 runner를 미리 확보한다.
+    # main.py가 07:57까지 대기 후 수집, 08:00 KST에 전송한다.
+    # 후속 예약은 성공 날짜를 확인하고 중복 발송 없이 종료한다.
+    - cron: "17,47 5,6 * * *"
+      timezone: "Asia/Seoul"
+    - cron: "17 7 * * *"
+      timezone: "Asia/Seoul"
   workflow_dispatch:  # 수동 실행 버튼
 
 concurrency:
@@ -18,7 +21,7 @@ permissions:
 jobs:
   brief:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
       - name: 대기 중 반영된 최신 전송 상태 가져오기

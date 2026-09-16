@@ -259,9 +259,12 @@ def build_schedule(schedule_data: dict, todo_items: list[tuple], now: datetime) 
     return _footer(embed, f"{schedule_data.get('source', '일정 소스 미상')} · {now:%H:%M} KST 조회", now)
 
 
-def build_notices(items) -> dict | None:
+def build_notices(items, status="ok") -> dict:
     if not items:
-        return None
+        body = ("조회한 공지 목록에 새 공지가 없습니다." if status in {"ok", "fresh", "empty"}
+                else "⚠️ 공지 소스 일부를 확인하지 못했습니다. 새 공지가 누락될 수 있습니다.")
+        return _footer(ds.make_embed("🎓 새 학사 공지", body, "notice"),
+                       "국민대 컴퓨터공학부 · SW중심대학")
     parts = []
     for label, posts in items:
         for title, url in posts:
@@ -390,7 +393,7 @@ def render_sections(now: datetime, data: dict, *, compact: bool | None = None) -
     builders = {
         "weather": lambda: build_weather(values["weather"]),
         "schedule": lambda: build_schedule(values["schedule"], values.get("assignments", []), now),
-        "notices": lambda: build_notices(values["notices"]),
+        "notices": lambda: build_notices(values["notices"], data.get("_source_health", {}).get("notices", {}).get("status", "ok")),
         "news": lambda: build_news(values["news"]),
         "market": lambda: build_market(values["market"]),
         "sports": lambda: build_sports(values["sports"]),

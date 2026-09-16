@@ -46,7 +46,14 @@ def fetch_rss(url):
     if raw is None:
         raise last_error or RuntimeError("RSS request failed")
     fetched_at = datetime.now(timezone.utc)
-    root = ET.fromstring(raw)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        # Some publisher feeds contain bare '&' in media URL attributes.
+        # Repair only unescaped ampersands; preserve valid XML entities and
+        # still reject truncated/malformed markup instead of losing articles.
+        repaired = re.sub(rb"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)", b"&amp;", raw)
+        root = ET.fromstring(repaired)
     channel = root.find("channel")
     source = clean_text(channel.findtext("title") or "") if channel is not None else ""
     items = []

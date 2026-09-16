@@ -32,6 +32,13 @@ CATEGORIES = (
     ("🔬 과기", HANKYUNG_IT, "한국경제"),
     ("🎬 문화", YONHAP_CULTURE, "연합뉴스"),
 )
+FALLBACK_FEEDS = {
+    "🏛️ 정치": ((HANKYUNG_POLITICS, "한국경제"),),
+    "💼 경제": (("https://www.hankyung.com/feed/economy", "한국경제"),),
+    "🏙️ 사회": (("https://www.hankyung.com/feed/society", "한국경제"),),
+    "🌏 국제": (("https://www.hankyung.com/feed/international", "한국경제"),),
+    "🎬 문화": (("https://www.hankyung.com/feed/life", "한국경제"),),
+}
 
 
 def _fresh(items: list[dict], now: datetime) -> list[dict]:
@@ -78,6 +85,8 @@ def _read_category(
 
 def _add_related_politics(primary: dict, now: datetime) -> None:
     """Attach a genuinely similar second headline without calling it verified."""
+    if primary["publisher"] == "한국경제":
+        return  # A fallback publisher cannot corroborate its own headline.
     try:
         other_items = _fresh(_rss.fetch_rss(HANKYUNG_POLITICS), now)[:12]
     except Exception:
@@ -107,12 +116,15 @@ def get_news(now: datetime | None = None) -> list[dict]:
     results = []
     seen_urls = set()
     for label, feed_url, publisher in CATEGORIES:
-        try:
-            item = _read_category(label, feed_url, publisher, now, seen_urls)
-            results.append(item)
-            seen_urls.add(item["url"])
-        except Exception as exc:
-            print(f"[경고] 뉴스 {label} 조회 실패: {type(exc).__name__}")
+        for candidate_url, candidate_publisher in ((feed_url, publisher), *FALLBACK_FEEDS.get(label, ())):
+            try:
+                item = _read_category(label, candidate_url, candidate_publisher, now, seen_urls)
+                results.append(item)
+                seen_urls.add(item["url"])
+                break
+            except Exception as exc:
+                print(f"[뉴스] {label} {candidate_publisher} 조회 실패: {type(exc).__name__}")
+        else:
             fail(f"뉴스-{label.split()[-1]}")
 
     politics = next((item for item in results if item["label"] == "🏛️ 정치"), None)

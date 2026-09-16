@@ -10,8 +10,11 @@ class WorkflowContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    def test_primary_and_recovery_runs_are_scheduled_at_kst_0730_0740_0750(self):
-        self.assertIn('- cron: "30,40,50 22 * * *"', self.workflow)
+    def test_runners_start_early_enough_to_absorb_cron_delays(self):
+        self.assertIn('- cron: "17,47 5,6 * * *"', self.workflow)
+        self.assertIn('- cron: "17 7 * * *"', self.workflow)
+        self.assertEqual(self.workflow.count('timezone: "Asia/Seoul"'), 2)
+        self.assertIn("timeout-minutes: 180", self.workflow)
 
     def test_overlapping_runs_are_serialized(self):
         self.assertIn("concurrency:", self.workflow)

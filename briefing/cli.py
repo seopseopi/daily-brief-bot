@@ -66,6 +66,39 @@ def doctor():
             "note": "설정 형식만 확인했습니다. 네트워크 요청·메시지 전송·상태 변경 없음."}
 
 
+def _coverage(name, value):
+    """Report actual content coverage without exposing titles or private values."""
+    if isinstance(value, dict):
+        if name == "schedule":
+            return {"events": len(value.get("events", [])),
+                    "calendar_connected": bool(value.get("calendar_configured")),
+                    "fixed_timetable_connected": bool(value.get("fixed_timetable_used"))}
+        if name == "weather":
+            return {"forecast": value.get("status") == "fresh", "air_quality": bool(value.get("air_quality")),
+                    "periods": len(value.get("periods", []))}
+        if name == "market":
+            return {"kr_holdings": len(value.get("kr_holdings", [])),
+                    "kr_holdings_configured": len(settings.MARKET_HOLDINGS_KR),
+                    "us_holdings": len(value.get("us_holdings", [])),
+                    "us_holdings_configured": len(settings.MARKET_HOLDINGS_US),
+                    "kr_hot": len(value.get("kr_hot", [])), "us_hot": len(value.get("us_hot", []))}
+        if name == "study":
+            return {"paper": value.get("status") == "fresh", "concept": bool(value.get("concept")),
+                    "terms": len(value.get("terms", [])), "summary_kind": value.get("summary_kind")}
+    if isinstance(value, list):
+        if name == "notices":
+            return {"new_notices": sum(len(posts) for _, posts in value)}
+        if name == "news":
+            from sources.news import CATEGORIES
+            return {"categories": len(value), "expected_categories": len(CATEGORIES)}
+        if name == "assignments":
+            return {"items": len(value), "channel_configured": bool(os.environ.get("DISCORD_BOT_TOKEN")
+                                                                     and os.environ.get("ASSIGNMENT_CHANNEL_ID"))}
+        if name == "community":
+            return {"items": sum(bool(item[4]) for item in value)}
+    return {}
+
+
 def check_connections():
     """Exercise the configured sources without exporting their personal content."""
     from datetime import datetime
@@ -85,11 +118,13 @@ def check_connections():
             health = dict(health)
             if name in data.get("_render_failed", []):
                 health["status"] = "unavailable"
-            sources.append({"name": name, **health})
+            sources.append({"name": name, **health, "coverage": _coverage(name, data.get(name))})
         sources.sort(key=lambda source: source["name"])
         failures = get_failures()
         return {"ok": bool(sources) and not failures and all(source["status"] in {"ok", "fresh", "empty"} for source in sources),
                 "checked_at": now.isoformat(), "sources": sources, "failures": failures,
+                "optional_unconfigured": (["CALENDAR_ICS_URLS"] if "schedule" in settings.ENABLED_SECTIONS
+                                           and not settings.CALENDAR_ICS_URLS else []),
                 "note": "실제 소스 조회·표시 형식만 검사했습니다. Discord 메시지 전송·상태 저장 없음."}
     finally:
         notices.discard_pending()

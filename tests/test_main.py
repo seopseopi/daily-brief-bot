@@ -2,7 +2,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import main
@@ -167,9 +167,12 @@ class DeliveryIdempotencyTests(unittest.TestCase):
         self.state_path = os.path.join(self.temp_dir.name, "delivery_state.json")
         self.path_patch = mock.patch.object(main, "DELIVERY_STATE_PATH", self.state_path)
         self.path_patch.start()
+        self.wait_patch = mock.patch.object(main, "_wait_until")
+        self.wait_patch.start()
 
     def tearDown(self):
         self.path_patch.stop()
+        self.wait_patch.stop()
         self.temp_dir.cleanup()
 
     def test_two_scheduled_runs_send_once_after_first_success(self):
@@ -223,6 +226,47 @@ class DeliveryIdempotencyTests(unittest.TestCase):
             json.dump([], state_file)
         with mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule"}, clear=True):
             self.assertFalse(main._scheduled_delivery_done(NOW))
+
+
+class ScheduledTimingTests(unittest.TestCase):
+    def test_target_is_eight_kst_for_scheduled_runs_only(self):
+        with mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule"}, clear=True):
+            self.assertEqual(main._scheduled_target(NOW), NOW.replace(hour=8, minute=0))
+            self.assertEqual(main._scheduled_target(NOW.astimezone(timezone.utc)), NOW.replace(hour=8, minute=0))
+        for env in ({"GITHUB_EVENT_NAME": "workflow_dispatch"},
+                    {"GITHUB_EVENT_NAME": "schedule", "DISCORD_DRY_RUN": "1"},
+                    {"GITHUB_EVENT_NAME": "schedule", "BRIEF_READ_ONLY": "1"}):
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertIsNone(main._scheduled_target(NOW))
+
+    def test_wait_rechecks_clock_and_sleeps_in_short_intervals(self):
+        target = NOW.replace(hour=8, minute=0)
+        times = [target - timedelta(seconds=45), target - timedelta(seconds=15), target]
+        with mock.patch.object(main, "datetime") as clock, mock.patch.object(main.time, "sleep") as sleep:
+            clock.now.side_effect = times
+            main._wait_until(target)
+        self.assertEqual(sleep.call_args_list, [mock.call(30), mock.call(15)])
+
+    def test_late_recovery_does_not_wait_until_tomorrow(self):
+        target = NOW.replace(hour=8, minute=0)
+        with mock.patch.object(main, "datetime") as clock, mock.patch.object(main.time, "sleep") as sleep:
+            clock.now.return_value = target + timedelta(minutes=10)
+            main._wait_until(target)
+        sleep.assert_not_called()
+
+    def test_collection_precedes_eight_but_send_waits_for_eight(self):
+        calls = []
+        target = NOW.replace(hour=8, minute=0)
+        with (mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule"}, clear=True),
+              mock.patch.object(main, "datetime", FixedDateTime),
+              mock.patch.object(main, "_scheduled_delivery_done", return_value=False),
+              mock.patch.object(main, "_mark_scheduled_delivery"),
+              mock.patch.object(main, "_wait_until", side_effect=lambda t: calls.append(t)),
+              mock.patch.object(main, "build_brief", side_effect=lambda now: calls.append("collect") or []),
+              mock.patch.object(main.ds, "send", side_effect=lambda embeds: calls.append("send")),
+              mock.patch.object(main.notices, "commit_pending")):
+            main.main()
+        self.assertEqual(calls, [target - timedelta(minutes=3), "collect", target, "send"])
 
 
 if __name__ == "__main__":

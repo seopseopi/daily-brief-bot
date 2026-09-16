@@ -13,6 +13,15 @@ import discord_sender
 
 
 class ConnectionCheckTests(unittest.TestCase):
+    def test_coverage_reports_missing_components_without_private_content(self):
+        private = "private-event-or-holding"
+        data = {"events": [{"name": private}], "calendar_configured": False, "fixed_timetable_used": True}
+        coverage = cli._coverage("schedule", data)
+        self.assertEqual(coverage, {"events": 1, "calendar_connected": False, "fixed_timetable_connected": True})
+        self.assertNotIn(private, json.dumps(coverage))
+        self.assertEqual(cli._coverage("news", [{}] * 5), {"categories": 5, "expected_categories": 6})
+        self.assertEqual(cli._coverage("study", {"status": "fresh", "concept": None, "terms": []})["terms"], 0)
+
     def test_live_check_reports_only_health_and_never_sends_or_saves(self):
         private = "private-schedule-title"
 

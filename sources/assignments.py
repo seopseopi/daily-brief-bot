@@ -234,18 +234,26 @@ def _fetch_discord_assignments():
 
     if llm_indices:
         try:
-            today_str = datetime.now(KST).date().isoformat()
             batch_size = max(1, min(settings.env_int("ASSIGNMENT_LLM_BATCH_SIZE", 10), 20))
-            for offset in range(0, len(llm_indices), batch_size):
-                batch_indices = llm_indices[offset : offset + batch_size]
-                llm_items = _llm.parse_assignments(
-                    [messages[i]["content"] for i in batch_indices],
-                    today_str,
-                )
-                if len(llm_items) != len(batch_indices):
-                    raise ValueError("LLM 응답 개수 불일치")
-                for i, item in zip(batch_indices, llm_items):
-                    parsed[i] = item
+            by_date = {}
+            for i in llm_indices:
+                # A fresh Actions runner replays history daily. "Tomorrow"
+                # belongs to the message's creation date, not today's run.
+                stamp = messages[i].get("timestamp")
+                sent_at = datetime.fromisoformat(stamp.replace("Z", "+00:00")) if stamp else datetime.now(KST)
+                if sent_at.tzinfo is None:
+                    raise ValueError("message timestamp must include timezone")
+                by_date.setdefault(sent_at.astimezone(KST).date().isoformat(), []).append(i)
+            for message_date, indices in by_date.items():
+                for offset in range(0, len(indices), batch_size):
+                    batch_indices = indices[offset : offset + batch_size]
+                    llm_items = _llm.parse_assignments(
+                        [messages[i]["content"] for i in batch_indices], message_date,
+                    )
+                    if len(llm_items) != len(batch_indices):
+                        raise ValueError("LLM 응답 개수 불일치")
+                    for i, item in zip(batch_indices, llm_items):
+                        parsed[i] = item
         except Exception as e:
             print(f"[경고] 과제 메시지 파싱(LLM) 실패(커서 유지): {type(e).__name__}")
             fail("과제 자동파싱(LLM)")

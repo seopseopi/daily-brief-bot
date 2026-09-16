@@ -55,6 +55,8 @@ def tr(text, cap=180):
     if not text:
         return ""
     try:
-        return _translate.translate_en_ko(text, max_len=cap)
+        result = _translate.translate_en_ko(text, max_len=cap)
     except Exception:
-        return text
+        result = text
+    # A failed translation must not turn a brief excerpt into an entire post.
+    return result[:cap - 1].rstrip() + "…" if cap and len(result) > cap else result

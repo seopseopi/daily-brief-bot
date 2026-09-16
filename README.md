@@ -85,7 +85,7 @@ python main.py --preview --sections weather,schedule,news --compact
 
 GitHub Actions에 `DISCORD_WEBHOOK_URL` Secret을 등록합니다. 개인 캘린더, 과제 채널, 위치와 관심 종목은 [설정 안내](docs/configuration.md)를 따라 연결하세요. 로컬 실제 전송은 웹후크 환경 변수를 설정한 뒤 `python main.py`로 실행합니다.
 
-예약은 **KST 07:30·07:40·07:50**의 실행 기회 중 첫 성공을 기록해 후속 예약 중복을 막습니다. GitHub Actions는 정시 도착을 보장하지 않으며, 여러 메시지 전송 또는 상태 저장 중 실패하면 재실행 시 중복될 수 있습니다. [예약·재시도 동작](docs/operations.md#예약-발송)
+발송 목표는 **매일 한국시간 오전 8시**입니다. 예약 지연에 대비해 KST 05:17부터 실행 기회를 확보하고, 07:57에 최신 데이터를 수집한 뒤 08:00까지 대기해 전송합니다. 첫 성공을 기록해 후속 예약 중복을 막습니다. GitHub Actions 자체의 정시 보장은 없으며, 대기 작업까지 늦게 시작하면 복구 발송도 늦어질 수 있습니다. [예약·재시도 동작](docs/operations.md#예약-발송)
 
 ## 구성과 검증
 

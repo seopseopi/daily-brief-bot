@@ -57,6 +57,19 @@ def article(title, published_at, *, link="https://news.example/item", descriptio
 
 
 class RssFixtureTests(unittest.TestCase):
+    def test_bare_ampersand_in_media_url_does_not_drop_entire_feed(self):
+        raw = RSS_FIXTURE.replace(b'<item>', b'<item><media url="https://example.com/watch?v=1&feature=share"/>')
+        with mock.patch.object(_rss, "open_url", return_value=FakeResponse(raw)):
+            items = _rss.fetch_rss("https://news.example/rss")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "정부 & 대학, AI 예산 발표")
+        self.assertEqual(items[0]["link"], "https://news.example/article-1")
+
+    def test_malformed_xml_still_raises_instead_of_claiming_empty_feed(self):
+        with mock.patch.object(_rss, "open_url", return_value=FakeResponse(b'<rss><channel>')):
+            with self.assertRaises(_rss.ET.ParseError):
+                _rss.fetch_rss("https://news.example/rss")
+
     def test_rss_preserves_source_timestamp_and_cleans_publisher_lead(self):
         with mock.patch.object(
             _rss.urllib.request,
@@ -90,6 +103,20 @@ class NewsFreshnessTests(unittest.TestCase):
 
     def tearDown(self):
         get_failures()
+
+    def test_failed_primary_uses_fresh_fallback_with_actual_publisher(self):
+        def feed(url):
+            if url == news.YONHAP_POLITICS:
+                raise _rss.ET.ParseError("broken feed")
+            return [article("대체 기사", NOW - timedelta(minutes=5))]
+        with (mock.patch.object(news, "CATEGORIES", (("🏛️ 정치", news.YONHAP_POLITICS, "연합뉴스"),)),
+              mock.patch.object(_rss, "fetch_rss", side_effect=feed),
+              mock.patch.object(settings, "USE_LLM_NEWS_SUMMARIES", False)):
+            result = news.get_news(NOW)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["publisher"], "한국경제")
+        self.assertIsNone(result[0]["related"])
+        self.assertEqual(get_failures(), [])
 
     def test_freshness_rejects_old_missing_and_far_future_articles(self):
         fixtures = [
