@@ -17,7 +17,7 @@ class ConnectionCheckTests(unittest.TestCase):
         private = "private-event-or-holding"
         data = {"events": [{"name": private}], "calendar_configured": False, "fixed_timetable_used": True}
         coverage = cli._coverage("schedule", data)
-        self.assertEqual(coverage, {"events": 1, "calendar_connected": False, "fixed_timetable_connected": True})
+        self.assertEqual(coverage, {"events": 1, "calendar_connected": True, "fixed_timetable_connected": True})
         self.assertNotIn(private, json.dumps(coverage))
         self.assertEqual(cli._coverage("news", [{}] * 5), {"categories": 5, "expected_categories": 6})
         self.assertEqual(cli._coverage("study", {"status": "fresh", "concept": None, "terms": []})["terms"], 0)

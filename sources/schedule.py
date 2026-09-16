@@ -1,4 +1,4 @@
-"""Today's schedule from private iCalendar feeds, with an explicit fallback.
+"""Today's personal calendar from private iCalendar feeds or a fixed timetable.
 
 Set ``CALENDAR_ICS_URLS`` to one or more newline-separated private iCal URLs.
 The environment-backed fixed timetable is used only when configured, unless
@@ -127,7 +127,7 @@ def get_schedule(now: datetime | None = None) -> dict:
     if fixed_requested and FIXED_TIMETABLE_ERROR:
         source_parts.append("고정 시간표 설정 오류")
     elif fixed_requested:
-        source_parts.append("고정 시간표(보조)" if configured else "고정 시간표(캘린더 미연결)")
+        source_parts.append("개인 캘린더 · 고정 시간표")
 
     return {
         "events": events,

@@ -18,6 +18,8 @@ GitHub에서 `Settings → Secrets and variables → Actions`를 엽니다. 로�
 
 ## 개인 캘린더
 
+고정 시간표를 개인 캘린더로 사용할 수 있습니다. `FIXED_TIMETABLE_JSON`이 설정되어 사용 중이면 정상 연결 상태이며, 별도의 iCal 주소는 필요하지 않습니다. 외부 캘린더를 추가로 사용하려면 아래 방법으로 연결합니다.
+
 Google Calendar 웹의 `설정 → 내 캘린더 → 캘린더 통합 → iCal 형식의 비밀 주소`를 복사해 `CALENDAR_ICS_URLS` **Secret**에 넣습니다. 여러 캘린더는 한 줄에 하나씩 넣습니다. [Google 공식 안내](https://support.google.com/calendar/answer/37648?hl=ko)
 
 반복·취소·종일 일정과 반복 일정의 예외를 반영합니다. 캘린더가 연결되지 않았거나 조회에 실패하면 해당 상태를 브리핑에 표시합니다.

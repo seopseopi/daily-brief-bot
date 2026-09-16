@@ -201,8 +201,6 @@ def build_schedule(schedule_data: dict, todo_items: list[tuple], now: datetime) 
         parts.append("⚠️ **일부 일정 소스만 정상 조회됨**")
     elif status == "unconfigured":
         parts.append("⚠️ **개인 일정 미연결** — 캘린더 또는 비공개 고정 시간표를 연결하세요.")
-    elif not schedule_data.get("calendar_configured") and schedule_data.get("fixed_timetable_used"):
-        parts.append("⚠️ **개인 캘린더 미연결** — 현재 고정 시간표만 표시합니다.")
 
     events = schedule_data.get("events") or []
     if not events and status not in {"unavailable", "unconfigured"}:

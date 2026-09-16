@@ -52,8 +52,13 @@ def doctor():
         valid_urls = all(urlparse(url).scheme in {"https", "http"} and urlparse(url).hostname for url in calendars)
     except ValueError:
         valid_urls = False
-    check("개인 캘린더", "error" if not valid_urls else "ready" if calendars else "optional",
-          "설정됨 · 실제 연결은 검사하지 않음" if calendars and valid_urls else "CALENDAR_ICS_URLS의 주소 형식 확인" if calendars else "CALENDAR_ICS_URLS 미설정")
+    fixed_configured = bool(settings.INCLUDE_FIXED_TIMETABLE and settings.FIXED_TIMETABLE_JSON)
+    calendar_error = not valid_urls or (fixed_configured and FIXED_TIMETABLE_ERROR)
+    check("개인 캘린더", "error" if calendar_error else "ready" if calendars or fixed_configured else "optional",
+          "캘린더 주소 또는 고정 시간표 JSON 형식 확인" if calendar_error else
+          "고정 시간표로 설정됨" if fixed_configured and not calendars else
+          "설정됨 · 실제 연결은 검사하지 않음" if calendars else
+          "CALENDAR_ICS_URLS 또는 FIXED_TIMETABLE_JSON 설정")
     check("고정 시간표", "error" if FIXED_TIMETABLE_ERROR else "ready" if settings.FIXED_TIMETABLE_JSON else "optional",
           "JSON 형식을 확인하세요" if FIXED_TIMETABLE_ERROR else "설정됨" if settings.FIXED_TIMETABLE_JSON else "FIXED_TIMETABLE_JSON 미설정")
     check("AI 요약", "ready" if os.environ.get("ANTHROPIC_API_KEY", "").strip() else "optional",
@@ -71,7 +76,7 @@ def _coverage(name, value):
     if isinstance(value, dict):
         if name == "schedule":
             return {"events": len(value.get("events", [])),
-                    "calendar_connected": bool(value.get("calendar_configured")),
+                    "calendar_connected": bool(value.get("calendar_configured") or value.get("fixed_timetable_used")),
                     "fixed_timetable_connected": bool(value.get("fixed_timetable_used"))}
         if name == "weather":
             return {"forecast": value.get("status") == "fresh", "air_quality": bool(value.get("air_quality")),
@@ -123,8 +128,7 @@ def check_connections():
         failures = get_failures()
         return {"ok": bool(sources) and not failures and all(source["status"] in {"ok", "fresh", "empty"} for source in sources),
                 "checked_at": now.isoformat(), "sources": sources, "failures": failures,
-                "optional_unconfigured": (["CALENDAR_ICS_URLS"] if "schedule" in settings.ENABLED_SECTIONS
-                                           and not settings.CALENDAR_ICS_URLS else []),
+                "optional_unconfigured": (["schedule"] if data.get("schedule", {}).get("status") == "unconfigured" else []),
                 "note": "실제 소스 조회·표시 형식만 검사했습니다. Discord 메시지 전송·상태 저장 없음."}
     finally:
         notices.discard_pending()
